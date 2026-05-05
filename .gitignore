@@ -1,0 +1,35 @@
+# data and outputs
+data/
+outputs/
+results/
+checkpoints/
+logs/
+wandb/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.ipynb_checkpoints/
+
+# environments
+.venv/
+venv/
+tnp-env/
+env/
+
+# model files
+*.pt
+*.pth
+*.ckpt
+
+# Slurm / HPC
+*.out
+*.err
+slurm-*.out
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/

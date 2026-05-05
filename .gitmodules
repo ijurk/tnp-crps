@@ -1,0 +1,3 @@
+[submodule "external/tnp"]
+	path = external/tnp
+	url = https://github.com/ijurk/tnp.git
