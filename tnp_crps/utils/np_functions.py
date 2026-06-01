@@ -2,6 +2,8 @@ import torch
 import torch.distributions as td
 from torch import nn
 
+from typing import Optional
+
 from tnp.data.base import Batch, ImageBatch
 from tnp.models.base import (
     ARConditionalNeuralProcess,
@@ -49,7 +51,7 @@ def np_pred_fn(
 def crps_pred_sample_fn(
     model: DirectTNP,
     batch: Batch,
-    num_samples: int | None = None,
+    num_samples: Optional[int] = None,
 ) -> torch.Tensor:
     return model.sample(
         xc=batch.xc,

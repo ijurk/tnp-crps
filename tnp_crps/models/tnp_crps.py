@@ -1,52 +1,85 @@
+from typing import Optional
+
 import torch
+from torch import nn
 
 
-def crps_loss(
-    samples: torch.Tensor,
-    target: torch.Tensor,
-    alpha: float = 1.0,
-) -> torch.Tensor:
-    """Marginal almost-fair CRPS.
+class DirectTNP(nn.Module):
+    """Direct-output TNP for CRPS training.
 
-    samples: [M, B, Nt, Dy]
-    target:  [B, Nt, Dy]
+    Unlike the original TNP, this model does not apply a Gaussian likelihood.
+    It returns direct predictions with shape [B, Nt, Dy].
 
-    alpha = 1.0 -> fair CRPS
-    alpha = 0.0 -> ordinary empirical CRPS
+    Repeated stochastic forward passes produce samples for CRPS.
     """
 
-    if samples.ndim != target.ndim + 1:
-        raise ValueError(
-            f"Expected samples to have one extra sample dimension. "
-            f"Got samples.shape={samples.shape}, target.shape={target.shape}."
-        )
+    def __init__(
+        self,
+        encoder: nn.Module,
+        decoder: nn.Module,
+        num_samples: int = 2,
+        crps_alpha: float = 1.0,
+        use_mc_dropout: bool = False,
+    ):
+        super().__init__()
 
-    if samples.shape[1:] != target.shape:
-        raise ValueError(
-            f"Expected samples.shape[1:] == target.shape. "
-            f"Got samples.shape={samples.shape}, target.shape={target.shape}."
-        )
+        self.encoder = encoder
+        self.decoder = decoder
+        self.num_samples = num_samples
+        self.crps_alpha = crps_alpha
+        self.use_mc_dropout = use_mc_dropout
 
-    if not 0.0 <= alpha <= 1.0:
-        raise ValueError(f"alpha must be in [0, 1]. Got {alpha}.")
+    def forward(
+        self,
+        xc: torch.Tensor,
+        yc: torch.Tensor,
+        xt: torch.Tensor,
+    ) -> torch.Tensor:
+        zt = self.encoder(xc, yc, xt)
+        return self.decoder(zt, xt)
 
-    num_samples = samples.shape[0]
+    def sample(
+        self,
+        xc: torch.Tensor,
+        yc: torch.Tensor,
+        xt: torch.Tensor,
+        num_samples: Optional[int] = None,
+    ) -> torch.Tensor:
+        """Return predictive samples with shape [M, B, Nt, Dy]."""
 
-    if num_samples < 2:
-        raise ValueError("Fair CRPS requires at least 2 samples.")
+        if num_samples is None:
+            num_samples = self.num_samples
 
-    target_term = torch.abs(samples - target.unsqueeze(0)).mean(dim=0)
+        if num_samples < 2:
+            raise ValueError("CRPS training requires at least 2 samples.")
 
-    pairwise_dist = torch.abs(samples[:, None, ...] - samples[None, :, ...])
+        dropout_states = None
 
-    ordinary_pairwise = pairwise_dist.mean(dim=(0, 1))
-    ordinary_crps = target_term - 0.5 * ordinary_pairwise
+        if self.use_mc_dropout:
+            dropout_states = self._enable_dropout_modules()
 
-    fair_pairwise = pairwise_dist.sum(dim=(0, 1)) / (
-        num_samples * (num_samples - 1)
-    )
-    fair_crps = target_term - 0.5 * fair_pairwise
+        try:
+            samples = [self.forward(xc, yc, xt) for _ in range(num_samples)]
+            return torch.stack(samples, dim=0)
+        finally:
+            if dropout_states is not None:
+                self._restore_dropout_modules(dropout_states)
 
-    almost_fair_crps = alpha * fair_crps + (1.0 - alpha) * ordinary_crps
+    def _enable_dropout_modules(self):
+        """Enable dropout even if model is in eval mode.
 
-    return almost_fair_crps.mean()
+        Needed for MC dropout validation/test sampling.
+        """
+        dropout_states = []
+
+        for module in self.modules():
+            if isinstance(module, nn.Dropout):
+                dropout_states.append((module, module.training))
+                module.train(True)
+
+        return dropout_states
+
+    @staticmethod
+    def _restore_dropout_modules(dropout_states):
+        for module, was_training in dropout_states:
+            module.train(was_training)

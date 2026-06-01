@@ -64,36 +64,36 @@ class LitWrapper(pl.LightningModule):
             self.val_batches.append(batch)
 
         if isinstance(self.model, DirectTNP):
-        samples = self.model.sample(
-            xc=batch.xc,
-            yc=batch.yc,
-            xt=batch.xt,
-            num_samples=self.model.num_samples,
-        )
+            samples = self.model.sample(
+                xc=batch.xc,
+                yc=batch.yc,
+                xt=batch.xt,
+                num_samples=self.model.num_samples,
+            )
 
-        val_crps = crps_loss(
-            samples=samples,
-            target=batch.yt,
-            alpha=self.model.crps_alpha,
-        )
-
-        pred_mean = samples.mean(dim=0)
-        rmse = nn.functional.mse_loss(pred_mean, batch.yt).sqrt().cpu().mean()
-
-        pairwise_diversity = torch.abs(
-            samples[:, None, ...] - samples[None, :, ...]
-        ).mean()
-
-        self.log("val/crps", val_crps, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("val/rmse", rmse, on_step=False, on_epoch=True, prog_bar=True)
-        self.log(
-            "val/sample_diversity",
-            pairwise_diversity,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=False,
-        )
-        return
+            val_crps = crps_loss(
+                samples=samples,
+                target=batch.yt,
+                alpha=self.model.crps_alpha,
+            )
+    
+            pred_mean = samples.mean(dim=0)
+            rmse = nn.functional.mse_loss(pred_mean, batch.yt).sqrt().cpu().mean()
+    
+            pairwise_diversity = torch.abs(
+                samples[:, None, ...] - samples[None, :, ...]
+            ).mean()
+    
+            self.log("val/crps", val_crps, on_step=False, on_epoch=True, prog_bar=True)
+            self.log("val/rmse", rmse, on_step=False, on_epoch=True, prog_bar=True)
+            self.log(
+                "val/sample_diversity",
+                pairwise_diversity,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=False,
+            )
+            return
 
         pred_dist = self.pred_fn(self.model, batch)
 

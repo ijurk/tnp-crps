@@ -67,12 +67,6 @@ scheduler:
     T_max: null
     eta_min: 1.0e-6
 
-# scheduler:
-#   type: cosine
-#   cosine:
-#     T_max: null
-#     eta_min: 1.0e-6
-
 params:
   epochs: 500
   embed_dim: 128

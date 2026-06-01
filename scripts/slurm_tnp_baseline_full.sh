@@ -1,9 +1,9 @@
 #!/bin/bash
 
-#SBATCH -J tnp-gpu-smoke
+#SBATCH -J tnp-baseline-full
 #SBATCH -A MLMI-ij292-SL2-GPU
 #SBATCH -p ampere
-#SBATCH --time=01:00:00
+#SBATCH --time=36:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
@@ -21,16 +21,17 @@ module list
 
 cd $SLURM_SUBMIT_DIR
 mkdir -p logs checkpoints
+
 source /rds/user/ij292/hpc-work/tnp-crps/tnp-env/bin/activate
 
 export TNP_CRPS_ROOT=/rds/user/ij292/hpc-work/tnp-crps
-export PYTHONPATH=/rds/user/ij292/hpc-work/tnp-crps/external/tnp:${PYTHONPATH:-}
+export PYTHONPATH=${TNP_CRPS_ROOT}:${TNP_CRPS_ROOT}/external/tnp:${PYTHONPATH:-}
 
 export WANDB_ENTITY=ij292-univeristy-of-cambridge
 export WANDB_MODE=online
 export WANDB_SILENT=true
 
-export TNP_RUN_ID=smoke-gpu-${SLURM_JOB_ID}
+export TNP_RUN_ID=baseline-full-${SLURM_JOB_ID}
 
 JOBID=$SLURM_JOB_ID
 
@@ -62,30 +63,24 @@ if not torch.cuda.is_available():
     raise RuntimeError("CUDA is not available inside this SLURM GPU job.")
 
 print("gpu name:", torch.cuda.get_device_name(0))
-
-x = torch.randn(1024, 1024, device="cuda")
-y = x @ x
-print("gpu matmul ok:", y.mean().item())
 PY
 
 cd external/tnp
 
-echo "Running TNP GPU smoke test..."
+echo "Running full baseline TNP training..."
 echo "TNP_RUN_ID=${TNP_RUN_ID}"
 
 python -u experiments/lightning_train.py \
-  params.epochs=2 \
-  generators.train.samples_per_epoch=256 \
-  generators.val.samples_per_epoch=128 \
+  params.epochs=500 \
   misc.logging=True \
-  misc.num_workers=2 \
-  misc.num_val_workers=2 \
+  misc.num_workers=1 \
+  misc.num_val_workers=0 \
   misc.check_val_every_n_epoch=1 \
-  misc.plot_interval=999 \
-  misc.run_group=baseline_tnp \
+  misc.checkpoint_interval=25 \
+  misc.plot_interval=10 \
+  misc.run_group=baseline_tnp_full \
   "$@" \
---config experiments/configs/generators/synthetic-1d.yml experiments/configs/models/tnp_lr_scheduler.yml
+  --config experiments/configs/generators/synthetic-1d.yml experiments/configs/models/tnp_lr_scheduler.yml
 
 echo "End time: $(date)"
 echo "Job finished."
-
