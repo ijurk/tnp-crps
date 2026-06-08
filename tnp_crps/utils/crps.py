@@ -6,13 +6,17 @@ def crps_loss(
     target: torch.Tensor,
     alpha: float = 1.0,
 ) -> torch.Tensor:
-    """Marginal almost-fair CRPS.
+    """Compute marginal almost-fair CRPS from predictive samples.
 
-    samples: [M, B, Nt, Dy]
-    target:  [B, Nt, Dy]
+    Args:
+        samples: Predictive samples with shape [M, B, Nt, Dy].
+        target: Ground-truth targets with shape [B, Nt, Dy].
+        alpha: Interpolation parameter for almost-fair CRPS.
+            alpha = 1.0 -> fair CRPS
+            alpha = 0.0 -> ordinary empirical CRPS
 
-    alpha = 1.0 -> fair CRPS
-    alpha = 0.0 -> ordinary empirical CRPS
+    Returns:
+        Scalar CRPS loss averaged over batch, target points, and output dimensions.
     """
 
     if samples.ndim != target.ndim + 1:

@@ -118,6 +118,42 @@ class LitWrapper(pl.LightningModule):
     ) -> None:
         _ = batch_idx
         result = {}
+
+        if isinstance(self.model, DirectTNP):
+            samples = self.model.sample(
+                xc=batch.xc,
+                yc=batch.yc,
+                xt=batch.xt,
+                num_samples=self.model.num_samples,
+            )
+
+            test_crps = crps_loss(
+                samples=samples,
+                target=batch.yt,
+                alpha=self.model.crps_alpha,
+            )
+
+            pred_mean = samples.mean(dim=0)
+            rmse = nn.functional.mse_loss(pred_mean, batch.yt).sqrt()
+
+            pairwise_diversity = torch.abs(
+                samples[:, None, ...] - samples[None, :, ...]
+            ).mean()
+
+            result["crps"] = test_crps.detach().cpu()
+            result["rmse"] = rmse.detach().cpu()
+            result["sample_diversity"] = pairwise_diversity.detach().cpu()
+
+            if hasattr(batch, "gt_pred") and batch.gt_pred is not None:
+                _, _, gt_loglik = batch.gt_pred(
+                    xc=batch.xc, yc=batch.yc, xt=batch.xt, yt=batch.yt
+                )
+                gt_loglik = gt_loglik.sum() / batch.yt[..., 0].numel()
+                result["gt_loglik"] = gt_loglik.detach().cpu()
+
+            self.test_outputs.append(result)
+            return
+        
         pred_dist = self.pred_fn(self.model, batch)
 
         # Compute metrics to track.

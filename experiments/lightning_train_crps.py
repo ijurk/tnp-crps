@@ -127,6 +127,7 @@ def main():
         filename="{epoch:04d}",
         every_n_epochs=experiment.misc.checkpoint_interval,
         save_last=True,
+        save_top_k=-1,
     )
 
     callbacks = [checkpoint_callback]
@@ -139,6 +140,7 @@ def main():
             project=experiment.misc.project,
             entity=os.environ.get("WANDB_ENTITY", None),
             name=run_name,
+            group=str(run_group) if run_group is not None else None,
             config=OmegaConf.to_container(experiment.config),
             log_model="all",
             save_dir=os.path.join(project_root, "logs"),

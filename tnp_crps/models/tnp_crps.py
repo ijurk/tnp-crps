@@ -58,9 +58,30 @@ class DirectTNP(nn.Module):
         if self.use_mc_dropout:
             dropout_states = self._enable_dropout_modules()
 
+        # try:
+        #     samples = [self.forward(xc, yc, xt) for _ in range(num_samples)]
+        #     return torch.stack(samples, dim=0)
+        
+        # vectorise MC dropout sampling
         try:
-            samples = [self.forward(xc, yc, xt) for _ in range(num_samples)]
-            return torch.stack(samples, dim=0)
+            batch_size = xc.shape[0]
+
+            xc_rep = xc.repeat_interleave(num_samples, dim=0)
+            yc_rep = yc.repeat_interleave(num_samples, dim=0)
+            xt_rep = xt.repeat_interleave(num_samples, dim=0)
+
+            pred_rep = self.forward(xc_rep, yc_rep, xt_rep)
+            # pred_rep: [B * M, Nt, Dy]
+
+            pred = pred_rep.reshape(
+                batch_size,
+                num_samples,
+                *pred_rep.shape[1:],
+            )
+
+            # [B, M, Nt, Dy] -> [M, B, Nt, Dy]
+            return pred.permute(1, 0, 2, 3).contiguous()
+        
         finally:
             if dropout_states is not None:
                 self._restore_dropout_modules(dropout_states)
@@ -68,7 +89,8 @@ class DirectTNP(nn.Module):
     def _enable_dropout_modules(self):
         """Enable dropout even if model is in eval mode.
 
-        Needed for MC dropout validation/test sampling.
+        This matters during validation/test, where Lightning may set model.eval().
+        We still need dropout active to generate MC-dropout samples.
         """
         dropout_states = []
 
@@ -83,3 +105,5 @@ class DirectTNP(nn.Module):
     def _restore_dropout_modules(dropout_states):
         for module, was_training in dropout_states:
             module.train(was_training)
+
+            

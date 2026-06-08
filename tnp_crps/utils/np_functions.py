@@ -18,9 +18,12 @@ from tnp_crps.utils.crps import crps_loss
 def np_pred_fn(
     model: nn.Module,
     batch: Batch,
-    num_samples: int = 1,
+    num_samples: Optional[int] = None,
 ) -> torch.distributions.Distribution:
     if isinstance(model, DirectTNP):
+        if num_samples is None or num_samples < 2:
+            num_samples = model.num_samples
+        
         samples = model.sample(
             xc=batch.xc,
             yc=batch.yc,
@@ -29,7 +32,7 @@ def np_pred_fn(
         )
         mean = samples.mean(dim=0)
         std = samples.std(dim=0).clamp_min(1e-6)
-        return td.Normal(mean, std)
+        return td.Normal(mean, std) #is mainly for plotting compatibility. It is not the true model likelihood.
         
     if isinstance(model, GriddedConvCNP):
         assert isinstance(batch, ImageBatch)
@@ -53,6 +56,11 @@ def crps_pred_sample_fn(
     batch: Batch,
     num_samples: Optional[int] = None,
 ) -> torch.Tensor:
+    """Generate predictive samples for CRPS-trained direct-output models.
+
+    Returns:
+        samples with shape [M, B, Nt, Dy].
+    """
     return model.sample(
         xc=batch.xc,
         yc=batch.yc,
@@ -69,10 +77,10 @@ def np_loss_fn(
     """Training loss.
 
     Standard NP/TNP models:
-        negative log-likelihood.
+        returns average negative log-likelihood.
 
     DirectTNP CRPS models:
-        marginal fair/almost-fair CRPS.
+        returns marginal fair/almost-fair CRPS.
     """
 
     if isinstance(model, DirectTNP):
