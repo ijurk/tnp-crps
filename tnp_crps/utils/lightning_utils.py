@@ -22,6 +22,8 @@ class LitWrapper(pl.LightningModule):
         pred_fn: Callable = np_pred_fn,
         plot_fn: Optional[Callable] = None,
         plot_interval: int = 1,
+        val_num_samples: Optional[int] = None,
+        test_num_samples: Optional[int] = None,
     ):
         super().__init__()
 
@@ -32,6 +34,9 @@ class LitWrapper(pl.LightningModule):
         self.pred_fn = pred_fn
         self.plot_fn = plot_fn
         self.plot_interval = plot_interval
+
+        self.val_num_samples = val_num_samples
+        self.test_num_samples = test_num_samples
 
         # Keep these for plotting.
         self.val_batches: List[Batch] = []
@@ -68,7 +73,11 @@ class LitWrapper(pl.LightningModule):
                 xc=batch.xc,
                 yc=batch.yc,
                 xt=batch.xt,
-                num_samples=self.model.num_samples,
+                num_samples=(
+                    self.val_num_samples
+                    if self.val_num_samples is not None
+                    else self.model.num_samples
+                ),
             )
 
             val_crps = crps_loss(
@@ -78,28 +87,29 @@ class LitWrapper(pl.LightningModule):
             )
     
             pred_mean = samples.mean(dim=0)
-            rmse = nn.functional.mse_loss(pred_mean, batch.yt).sqrt().cpu().mean()
+            # rmse = nn.functional.mse_loss(pred_mean, batch.yt).sqrt().cpu().mean()
+            rmse = nn.functional.mse_loss(pred_mean, batch.yt).sqrt()
     
-            pairwise_diversity = torch.abs(
-                samples[:, None, ...] - samples[None, :, ...]
-            ).mean()
+            num_samples = samples.shape[0]
+
+            pairwise_dist = torch.abs(samples[:, None, ...] - samples[None, :, ...])
+            
+            pairwise_diversity = (pairwise_dist.sum(dim=(0, 1)) / (num_samples * (num_samples - 1))).mean()
+
+            ensemble_spread = samples.var(dim=0, unbiased=True).mean().sqrt()
     
             self.log("val/crps", val_crps, on_step=False, on_epoch=True, prog_bar=True)
             self.log("val/rmse", rmse, on_step=False, on_epoch=True, prog_bar=True)
-            self.log(
-                "val/sample_diversity",
-                pairwise_diversity,
-                on_step=False,
-                on_epoch=True,
-                prog_bar=False,
-            )
+            self.log("val/sample_diversity", pairwise_diversity, on_step=False, on_epoch=True, prog_bar=False)
+            self.log("val/ensemble_spread", ensemble_spread, on_step=False, on_epoch=True,prog_bar=False)
             return
 
         pred_dist = self.pred_fn(self.model, batch)
 
         # Compute metrics to track.
         loglik = pred_dist.log_prob(batch.yt).sum() / batch.yt[..., 0].numel()
-        rmse = nn.functional.mse_loss(pred_dist.mean, batch.yt).sqrt().cpu().mean()
+        # rmse = nn.functional.mse_loss(pred_dist.mean, batch.yt).sqrt().cpu().mean()
+        rmse = nn.functional.mse_loss(pred_dist.mean, batch.yt).sqrt()
 
         self.log("val/loglik", loglik, on_step=False, on_epoch=True, prog_bar=True)
         self.log("val/rmse", rmse, on_step=False, on_epoch=True, prog_bar=True)
@@ -124,7 +134,11 @@ class LitWrapper(pl.LightningModule):
                 xc=batch.xc,
                 yc=batch.yc,
                 xt=batch.xt,
-                num_samples=self.model.num_samples,
+                num_samples=(
+                    self.test_num_samples
+                    if self.test_num_samples is not None
+                    else self.model.num_samples
+                ),
             )
 
             test_crps = crps_loss(
@@ -136,13 +150,18 @@ class LitWrapper(pl.LightningModule):
             pred_mean = samples.mean(dim=0)
             rmse = nn.functional.mse_loss(pred_mean, batch.yt).sqrt()
 
-            pairwise_diversity = torch.abs(
-                samples[:, None, ...] - samples[None, :, ...]
-            ).mean()
+            num_samples = samples.shape[0]
+
+            pairwise_dist = torch.abs(samples[:, None, ...] - samples[None, :, ...])
+            
+            pairwise_diversity = (pairwise_dist.sum(dim=(0, 1)) / (num_samples * (num_samples - 1))).mean()
+
+            ensemble_spread = samples.var(dim=0, unbiased=True).mean().sqrt()
 
             result["crps"] = test_crps.detach().cpu()
             result["rmse"] = rmse.detach().cpu()
             result["sample_diversity"] = pairwise_diversity.detach().cpu()
+            result["ensemble_spread"] = ensemble_spread.detach().cpu()
 
             if hasattr(batch, "gt_pred") and batch.gt_pred is not None:
                 _, _, gt_loglik = batch.gt_pred(

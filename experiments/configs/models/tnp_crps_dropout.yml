@@ -75,6 +75,8 @@ params:
   norm_first: True
   num_layers: 5
   num_samples: 2
+  val_num_samples: 8
+  test_num_samples: 64
   crps_alpha: 1.0
   p_dropout: 0.05
 

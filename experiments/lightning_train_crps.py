@@ -100,6 +100,8 @@ def main():
         pred_fn=np_pred_fn,
         plot_fn=plot_fn,
         plot_interval=experiment.misc.plot_interval,
+        val_num_samples=getattr(experiment.params, "val_num_samples", model.num_samples),
+        test_num_samples=getattr(experiment.params, "test_num_samples", model.num_samples),
         )
 
     checkpoint_parts = [
