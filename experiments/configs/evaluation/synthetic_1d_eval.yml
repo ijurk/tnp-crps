@@ -1,0 +1,81 @@
+output_dir: results/synthetic_1d/dispersion_all_models
+device: cuda
+
+# M_eval for all sample-based metrics.
+num_eval_samples: 64
+
+samples_per_eval_set: 4096
+eval_batch_size: 16
+max_batches: null
+
+base_generator_config: external/tnp/experiments/configs/generators/synthetic-1d.yml
+
+eval_sets:
+  - name: mixture
+    kernel: mixture
+  - name: rbf
+    kernel: rbf_kernel
+  - name: matern12
+    kernel: matern12_kernel
+  - name: matern32
+    kernel: matern32_kernel
+  - name: matern52
+    kernel: matern52_kernel
+  - name: periodic
+    kernel: periodic_kernel
+
+models:
+  - name: gaussian_tnp_nll
+    model_config: external/tnp/experiments/configs/models/tnp_lr_scheduler.yml
+    checkpoint_path: checkpoints/baseline_tnp_full/synthetic-1d-regression/TNP-L5-H8-D128/baseline-full-29842761/last.ckpt
+    overrides: []
+
+  - name: dropout_crps_m4_p005
+    model_config: experiments/configs/models/tnp_crps_dropout.yml
+    checkpoint_path: checkpoints/crps_tnp_dropout_full/synthetic-1d-regression/TNP-CRPS-Dropout-L5-H8-D128/full-m4-30031703/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.val_num_samples=8
+      - params.test_num_samples=64
+      - params.p_dropout=0.05
+      - params.crps_alpha=1.0
+
+  - name: stochln_crps_m4
+    model_config: experiments/configs/models/tnp_crps_stochln.yml
+    checkpoint_path: checkpoints/crps_tnp_layernorm_full/synthetic-1d-regression/TNP-CRPS-StochLN-L5-H8-D128/full-m4-30048977/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.val_num_samples=8
+      - params.test_num_samples=64
+      - params.crps_alpha=1.0
+      - params.layernorm_noise_dim=32
+
+  - name: dropout_crps_m2_p005
+    model_config: experiments/configs/models/tnp_crps_dropout.yml
+    checkpoint_path: checkpoints/crps_tnp_dropout_full/synthetic-1d-regression/TNP-CRPS-Dropout-L5-H8-D128/m2-p005-30309393/last.ckpt
+    overrides:
+      - params.num_samples=2
+      - params.val_num_samples=8
+      - params.test_num_samples=64
+      - params.p_dropout=0.05
+      - params.crps_alpha=1.0
+
+  - name: stochln_crps_m2
+    model_config: experiments/configs/models/tnp_crps_stochln.yml
+    checkpoint_path: checkpoints/crps_tnp_layernorm_full/synthetic-1d-regression/TNP-CRPS-StochLN-L5-H8-D128/m2-30309397/last.ckpt
+    overrides:
+      - params.num_samples=2
+      - params.val_num_samples=8
+      - params.test_num_samples=64
+      - params.crps_alpha=1.0
+      - params.layernorm_noise_dim=32
+
+  - name: dropout_crps_m2_p010
+    model_config: experiments/configs/models/tnp_crps_dropout.yml
+    checkpoint_path: checkpoints/crps_tnp_dropout_full/synthetic-1d-regression/TNP-CRPS-Dropout-L5-H8-D128/m2-p010-30309398/last.ckpt
+    overrides:
+      - params.num_samples=2
+      - params.val_num_samples=8
+      - params.test_num_samples=64
+      - params.p_dropout=0.10
+      - params.crps_alpha=1.0

@@ -1,0 +1,78 @@
+output_dir: results/synthetic_1d/function_plots_main
+device: cuda
+
+base_generator_config: external/tnp/experiments/configs/generators/synthetic-1d.yml
+
+num_plot_samples: 256
+num_sample_paths: 6
+x_range: [-4.0, 4.0]
+points_per_unit: 64
+search_batches: 4096
+
+# Keep this short for paper/presentation figures.
+# Current choices:
+# - Gaussian baseline
+# - strongest dropout candidate from aggregate table
+# - better StochLN candidate on Gaussian control
+models:
+  - name: Gaussian TNP NLL
+    model_config: external/tnp/experiments/configs/models/tnp_lr_scheduler.yml
+    checkpoint_path: checkpoints/baseline_tnp_full/synthetic-1d-regression/TNP-L5-H8-D128/baseline-full-29842761/last.ckpt
+    show_sample_paths: false
+    overrides: []
+
+  - name: Dropout CRPS M2 p0.10
+    model_config: experiments/configs/models/tnp_crps_dropout.yml
+    checkpoint_path: checkpoints/crps_tnp_dropout_full/synthetic-1d-regression/TNP-CRPS-Dropout-L5-H8-D128/m2-p010-30309398/last.ckpt
+    show_sample_paths: true
+    overrides:
+      - params.num_samples=2
+      - params.val_num_samples=8
+      - params.test_num_samples=64
+      - params.p_dropout=0.10
+      - params.crps_alpha=1.0
+
+  - name: StochLN CRPS M4
+    model_config: experiments/configs/models/tnp_crps_stochln.yml
+    checkpoint_path: checkpoints/crps_tnp_layernorm_full/synthetic-1d-regression/TNP-CRPS-StochLN-L5-H8-D128/full-m4-30048977/last.ckpt
+    show_sample_paths: true
+    overrides:
+      - params.num_samples=4
+      - params.val_num_samples=8
+      - params.test_num_samples=64
+      - params.crps_alpha=1.0
+      - params.layernorm_noise_dim=32
+
+plot_specs:
+  # Smooth, easier case with many context points.
+  - name: rbf_high_context
+    kernel: rbf_kernel
+    min_nc: 32
+    task_index: 0
+    show_targets: true
+    show_ground_truth: true
+
+  # Rough, low-context case.
+  - name: matern12_low_context
+    kernel: matern12_kernel
+    max_nc: 4
+    task_index: 0
+    show_targets: true
+    show_ground_truth: true
+
+  # Periodic, low-context case.
+  - name: periodic_low_context
+    kernel: periodic_kernel
+    max_nc: 4
+    task_index: 0
+    show_targets: true
+    show_ground_truth: true
+
+  # Mixed distribution, medium context.
+  - name: mixture_medium_context
+    kernel: mixture
+    min_nc: 8
+    max_nc: 16
+    task_index: 0
+    show_targets: true
+    show_ground_truth: true
