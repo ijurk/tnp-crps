@@ -87,9 +87,14 @@ def plot_function_comparison(
     prediction_rows: List[Dict],
     output_path_base: Path,
     title: str,
-    num_sample_paths: int = 6,
+    num_sample_paths: int = 5,
     y_lim: Optional[Tuple[float, float]] = None,
-    figsize_per_row: Tuple[float, float] = (8.0, 3.0),
+    figsize_per_row: Tuple[float, float] = (11.0, 3.6),
+    legend_fontsize: float = 17.0,
+    title_fontsize: float = 17.0,
+    panel_label_fontsize: float = 15.0,
+    axis_label_fontsize: float = 15.0,
+    tick_fontsize: float = 13.0,
     show_targets: bool = True,
     show_ground_truth: bool = True,
 ) -> None:
@@ -175,28 +180,16 @@ def plot_function_comparison(
             x_dense,
             q025,
             q975,
-            alpha=0.16,
+            color="tab:blue",
+            alpha=0.20,
             label="95% interval",
-        )
-        ax.fill_between(
-            x_dense,
-            q10,
-            q90,
-            alpha=0.22,
-            label="80% interval",
-        )
-        ax.fill_between(
-            x_dense,
-            q25,
-            q75,
-            alpha=0.32,
-            label="50% interval",
         )
 
         # Predictive mean, matching RMSE evaluation.
         ax.plot(
             x_dense,
             mean,
+            color="tab:blue",
             linewidth=2.2,
             label="Predictive mean",
         )
@@ -254,11 +247,12 @@ def plot_function_comparison(
 
         ax.set_ylim(y_lim)
         ax.set_xlim(float(x_dense.min()), float(x_dense.max()))
-        ax.set_ylabel(model_name)
+        ax.set_ylabel(model_name,fontsize=panel_label_fontsize,labelpad=10)
+        ax.tick_params(axis="both",labelsize=tick_fontsize)
         ax.grid(True, alpha=0.35)
 
-    axes[0].set_title(title)
-    axes[-1].set_xlabel("x")
+    axes[0].set_title(title, fontsize=title_fontsize, pad=10)
+    axes[-1].set_xlabel("x", fontsize=axis_label_fontsize, labelpad=8)
 
     handles = []
     labels = []
@@ -277,16 +271,22 @@ def plot_function_comparison(
         by_label.keys(),
         loc="upper center",
         ncol=4,
-        fontsize=9,
-        bbox_to_anchor=(0.5, 1.0),
+        fontsize=legend_fontsize,
+        markerscale=1.25,
+        handlelength=2.0,
+        handletextpad=0.6,
+        columnspacing=1.2,
+        labelspacing=0.6,
+        frameon=True,
+        bbox_to_anchor=(0.5, 0.995),
     )
-
-    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.93))
+    
+    fig.tight_layout(rect=(0.02, 0.02, 0.98, 0.87), h_pad=1.1)
 
     png_path = output_path_base.with_suffix(".png")
     pdf_path = output_path_base.with_suffix(".pdf")
 
-    fig.savefig(png_path, dpi=250, bbox_inches="tight")
+    fig.savefig(png_path, dpi=300, bbox_inches="tight")
     fig.savefig(pdf_path, bbox_inches="tight")
     plt.close(fig)
 
