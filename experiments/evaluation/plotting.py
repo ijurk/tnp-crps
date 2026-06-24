@@ -253,9 +253,14 @@ def plot_function_comparison(
     prediction_rows: List[Dict],
     output_path_base: Path,
     title: str,
-    num_sample_paths: int = 6,
+    num_sample_paths: int = 5,
     y_lim: Optional[Tuple[float, float]] = None,
-    figsize_per_row: Tuple[float, float] = (8.0, 3.0),
+    figsize_per_row: Tuple[float, float] = (11.0, 3.6),
+    legend_fontsize: float = 17.0,
+    title_fontsize: float = 17.0,
+    panel_label_fontsize: float = 15.0,
+    axis_label_fontsize: float = 15.0,
+    tick_fontsize: float = 13.0,
     show_targets: bool = True,
     show_ground_truth: bool = True,
     show_realised_task: bool = True,
@@ -359,7 +364,7 @@ def plot_function_comparison(
                 "Predictive sample paths",
             )
         )
-        
+
         interval_label = str(
             row.get(
                 "interval_label",
@@ -416,6 +421,7 @@ def plot_function_comparison(
             x_dense,
             q025,
             q975,
+            color="tab:blue",
             alpha=0.20,
             label=interval_label,
             zorder=0,
@@ -425,6 +431,7 @@ def plot_function_comparison(
         ax.plot(
             x_dense,
             mean,
+            color="tab:blue",
             linewidth=2.2,
             label="Predictive mean",
             zorder=3,
@@ -516,7 +523,8 @@ def plot_function_comparison(
 
         ax.set_ylim(y_lim)
         ax.set_xlim(float(x_dense.min()), float(x_dense.max()))
-        ax.set_ylabel(model_name)
+        ax.set_ylabel(model_name,fontsize=panel_label_fontsize,labelpad=10)
+        ax.tick_params(axis="both",labelsize=tick_fontsize)
         ax.grid(True, alpha=0.35)
 
     title_bits = [title]
@@ -532,18 +540,32 @@ def plot_function_comparison(
                 f"regime={latent_meta['regime_name']} "
                 f"(id={latent_meta['regime_id']})"
             )
-            
+
     if "fork_x" in latent_meta:
-        title_bits.append(f"fork x0={latent_meta['fork_x']:.3f}")
+        title_bits.append(
+            f"fork x0={latent_meta['fork_x']:.3f}"
+        )
 
     if "delta" in latent_meta:
-        title_bits.append(f"delta={latent_meta['delta']:.2f}")
+        title_bits.append(
+            f"delta={latent_meta['delta']:.2f}"
+        )
 
     if "transition_width" in latent_meta:
-        title_bits.append(f"tw={latent_meta['transition_width']:.2f}")
+        title_bits.append(
+            f"tw={latent_meta['transition_width']:.2f}"
+        )
 
-    axes[0].set_title(" | ".join(title_bits))
-    axes[-1].set_xlabel("x")
+    axes[0].set_title(
+        " | ".join(title_bits),
+        fontsize=title_fontsize,
+        pad=10,
+    )
+    axes[-1].set_xlabel(
+        "x",
+        fontsize=axis_label_fontsize,
+        labelpad=8,
+    )
 
     handles = []
     labels = []
@@ -561,17 +583,26 @@ def plot_function_comparison(
         by_label.values(),
         by_label.keys(),
         loc="upper center",
-        ncol=min(5, max(1, len(by_label))),
-        fontsize=9,
-        bbox_to_anchor=(0.5, 1.0),
+        ncol=min(
+            5,
+            max(1, len(by_label)),
+        ),
+        fontsize=legend_fontsize,
+        markerscale=1.25,
+        handlelength=2.0,
+        handletextpad=0.6,
+        columnspacing=1.2,
+        labelspacing=0.6,
+        frameon=True,
+        bbox_to_anchor=(0.5, 0.995),
     )
 
-    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.93))
+    fig.tight_layout(rect=(0.02, 0.02, 0.98, 0.87), h_pad=1.1)
 
     png_path = output_path_base.with_suffix(".png")
     pdf_path = output_path_base.with_suffix(".pdf")
 
-    fig.savefig(png_path, dpi=250, bbox_inches="tight")
+    fig.savefig(png_path, dpi=300, bbox_inches="tight")
     fig.savefig(pdf_path, bbox_inches="tight")
     plt.close(fig)
 
