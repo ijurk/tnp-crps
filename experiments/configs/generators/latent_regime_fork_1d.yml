@@ -1,0 +1,106 @@
+generators:
+  train:
+    _target_: tnp_crps.data.latent_regime_fork.LatentRegimeForkGenerator
+    dim: ${params.dim_x}
+    kernel: ${matern52_kernel}
+    noise_std: 0.1
+    delta: 1.5
+    transition_width: 0.4
+    long_period: 2.5
+    short_period: 0.8
+    step_sharpness: 6.0
+    fork_range: [-0.5, 0.75]
+    domain_range: [-4.0, 4.0]
+    context_window_1: [-3.5, -2.0]
+    context_window_2: [-1.2, -0.2]
+    target_post_prob: 0.8
+    target_pre_margin: 0.2
+    num_regimes: 4
+    jitter: 1e-5
+    return_gt_pred: false
+    min_nc: 8
+    max_nc: 64
+    min_nt: 128
+    max_nt: 128
+    samples_per_epoch: 16_000
+    batch_size: 16
+
+  val:
+    _target_: tnp_crps.data.latent_regime_fork.LatentRegimeForkGenerator
+    dim: ${params.dim_x}
+    kernel: ${matern52_kernel}
+    noise_std: 0.1
+    delta: 1.5
+    transition_width: 0.4
+    long_period: 2.5
+    short_period: 0.8
+    step_sharpness: 6.0
+    fork_range: [-0.5, 0.75]
+    domain_range: [-4.0, 4.0]
+    context_window_1: [-3.5, -2.0]
+    context_window_2: [-1.2, -0.2]
+    target_post_prob: 0.8
+    target_pre_margin: 0.2
+    num_regimes: 4
+    jitter: 1e-5
+    return_gt_pred: true
+    min_nc: 8
+    max_nc: 64
+    min_nt: 128
+    max_nt: 128
+    samples_per_epoch: 4096
+    batch_size: 16
+    deterministic: True
+
+  test:
+    _target_: tnp_crps.data.latent_regime_fork.LatentRegimeForkGenerator
+    dim: ${params.dim_x}
+    kernel: ${matern52_kernel}
+    noise_std: 0.1
+    delta: 1.5
+    transition_width: 0.4
+    long_period: 2.5
+    short_period: 0.8
+    step_sharpness: 6.0
+    fork_range: [-0.5, 0.75]
+    domain_range: [-4.0, 4.0]
+    context_window_1: [-3.5, -2.0]
+    context_window_2: [-1.2, -0.2]
+    target_post_prob: 0.8
+    target_pre_margin: 0.2
+    num_regimes: 4
+    jitter: 1e-5
+    return_gt_pred: true
+    min_nc: 8
+    max_nc: 64
+    min_nt: 128
+    max_nt: 128
+    samples_per_epoch: 4096
+    batch_size: 16
+    deterministic: True
+
+matern52_kernel:
+  _target_: tnp.networks.gp.MaternKernel
+  _partial_: True
+  nu: 2.5
+  ard_num_dims: ${params.dim_x}
+  min_log10_lengthscale: ${params.min_log10_lengthscale}
+  max_log10_lengthscale: ${params.max_log10_lengthscale}
+
+params:
+  dim_x: 1
+  dim_y: 1
+  min_log10_lengthscale: -0.602
+  max_log10_lengthscale: 0.0
+
+misc:
+  project: synthetic-1d-latent-regime-fork
+  eval_name: test
+  seed: 1
+  only_plots: False
+  num_plots: 10
+  subplots: False
+  savefig: False
+  logging: False
+  plot_interval: 10
+  check_val_every_n_epoch: 10
