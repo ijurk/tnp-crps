@@ -85,6 +85,61 @@ def crps_per_element(
 
     return target_term - 0.5 * combined_pairwise
 
+def energy_score_per_task(
+    samples: torch.Tensor,
+    target: torch.Tensor,
+    mask: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """Fair finite-ensemble energy score per task.
+
+    Args:
+        samples: [M, B, Nt, Dy]
+        target:  [B, Nt, Dy]
+        mask:    optional [B, Nt] or [B, Nt, Dy]
+
+    Returns:
+        [B] energy scores, with NaN for tasks with no selected targets.
+    """
+    if samples.ndim != target.ndim + 1:
+        raise ValueError(
+            f"Expected samples [M, ...] and target [...]. "
+            f"Got samples={samples.shape}, target={target.shape}."
+        )
+
+    if samples.shape[1:] != target.shape:
+        raise ValueError(
+            f"Expected samples.shape[1:] == target.shape. "
+            f"Got samples={samples.shape}, target={target.shape}."
+        )
+
+    num_samples = samples.shape[0]
+    if num_samples < 2:
+        raise ValueError("Energy score requires at least 2 samples.")
+
+    bool_mask = expand_mask(mask, target)
+
+    scores = []
+    for b in range(target.shape[0]):
+        flat_mask = bool_mask[b].reshape(-1)
+
+        if int(flat_mask.sum().item()) == 0:
+            scores.append(torch.tensor(float("nan"), device=target.device))
+            continue
+
+        sample_b = samples[:, b].reshape(num_samples, -1)[:, flat_mask]
+        target_b = target[b].reshape(-1)[flat_mask]
+
+        sample_to_target = torch.linalg.vector_norm(
+            sample_b - target_b.unsqueeze(0),
+            dim=-1,
+        ).mean()
+
+        pairwise = torch.cdist(sample_b, sample_b, p=2)
+        pairwise_fair = pairwise.sum() / (num_samples * (num_samples - 1))
+
+        scores.append(sample_to_target - 0.5 * pairwise_fair)
+
+    return torch.stack(scores)
 
 def metric_sums_for_mask(
     samples: torch.Tensor,
@@ -118,6 +173,8 @@ def metric_sums_for_mask(
     )
 
     crps = crps_per_element(samples=samples, target=target, alpha=alpha)
+    energy = energy_score_per_task(samples=samples, target=target, mask=mask)
+    valid_energy = torch.isfinite(energy)
 
     row: Dict[str, float] = {
         "num_eval_samples": int(num_samples),
@@ -126,6 +183,8 @@ def metric_sums_for_mask(
         "crps_sum": float(masked_sum(crps, bool_mask).item()),
         "var_sum": float(masked_sum(sample_var, bool_mask).item()),
         "diversity_sum": float(masked_sum(offdiag_diversity, bool_mask).item()),
+        "energy_score_sum": float(energy[valid_energy].sum().item()),
+        "energy_score_num_tasks": int(valid_energy.sum().item()),
     }
 
     for level in interval_levels:
@@ -237,7 +296,7 @@ def finalise_metric_rows(rows: List[Dict[str, float]]) -> pd.DataFrame:
         col
         for col in raw.columns
         if (
-            col in {"numel", "sse", "crps_sum", "var_sum", "diversity_sum"}
+            col in {"numel", "sse", "crps_sum", "var_sum", "diversity_sum","energy_score_sum", "energy_score_num_tasks"}
             or col.startswith("coverage_count_")
             or col.startswith("width_sum_")
             or col.startswith("rank_")
@@ -253,6 +312,7 @@ def finalise_metric_rows(rows: List[Dict[str, float]]) -> pd.DataFrame:
     out["crps"] = out["crps_sum"] / out["numel"]
     out["ensemble_spread"] = (out["var_sum"] / out["numel"]).pow(0.5)
     out["sample_diversity_offdiag"] = out["diversity_sum"] / out["numel"]
+    out["energy_score"] = out["energy_score_sum"] / out["energy_score_num_tasks"].clip(lower=1)
 
     finite_m_correction = ((out["num_eval_samples"] + 1.0) / out["num_eval_samples"]).pow(
         0.5
@@ -279,6 +339,7 @@ def finalise_metric_rows(rows: List[Dict[str, float]]) -> pd.DataFrame:
         "numel",
         "rmse_pooled",
         "crps",
+        "energy_score",
         "ensemble_spread",
         "spread_skill_ratio",
         "sample_diversity_offdiag",

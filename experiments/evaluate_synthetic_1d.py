@@ -189,11 +189,15 @@ def evaluate_one_model_on_one_set(
     model_overrides = list(model_entry.get("overrides", []) or [])
 
     eval_name = eval_set["name"]
-    kernel_name = eval_set["kernel"]
+    kernel_name = eval_set.get("kernel", None)
+    eval_overrides = list(eval_set.get("overrides", []) or [])
 
     print("=" * 80)
     print(f"Evaluating model={model_name}")
-    print(f"Eval set={eval_name}, kernel={kernel_name}")
+    if kernel_name is None:
+        print(f"Eval set={eval_name}")
+    else:
+        print(f"Eval set={eval_name}, kernel={kernel_name}")
     print(f"Checkpoint={checkpoint_path}")
     print("=" * 80)
 
@@ -202,10 +206,11 @@ def evaluate_one_model_on_one_set(
 
     config = load_merged_config(
         config_paths=[base_generator_config, model_config],
-        overrides=model_overrides,
+        overrides=model_overrides + eval_overrides,
     )
-
-    apply_eval_kernel(config, kernel_name)
+    
+    if kernel_name is not None:
+        apply_eval_kernel(config, kernel_name)
     apply_eval_dataset_overrides(
         config,
         samples_per_eval_set=samples_per_eval_set,
@@ -348,6 +353,7 @@ def main() -> None:
         "context_bucket",
         "rmse_pooled",
         "crps",
+        "energy_score",
         "ensemble_spread",
         "spread_skill_ratio",
         "coverage_90",

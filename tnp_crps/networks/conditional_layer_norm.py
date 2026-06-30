@@ -92,15 +92,19 @@ class ConditionalLayerNorm(nn.Module):
         )
 
         if self._noise is None:
-            # Deterministic fallback for ordinary forward calls.
-            noise = torch.randn(
-                x.shape[0],
-                self.noise_dim,
-                device=x.device,
-                dtype=x.dtype,
-            )
-        else:
-            noise = self._noise.to(device=x.device, dtype=x.dtype)
+            # Deterministic fallback for ordinary forward calls:
+            # standard LayerNorm with the learned base affine parameters,
+            # and no stochastic perturbation.
+            if self.weight is None:
+                return y
+        
+            view_shape = [1] * (x.ndim - 1) + [x.shape[-1]]
+            weight = self.weight.view(*view_shape)
+            bias = self.bias.view(*view_shape)
+        
+            return y * weight + bias
+        
+        noise = self._noise.to(device=x.device, dtype=x.dtype)
 
         if noise.shape[0] != x.shape[0]:
             raise ValueError(
