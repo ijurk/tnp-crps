@@ -39,3 +39,4 @@ slurm-*.out
 !tnp_crps/data/
 !tnp_crps/data/__init__.py
 !tnp_crps/data/*.py
+wandb_cache/
