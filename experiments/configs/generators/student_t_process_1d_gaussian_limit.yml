@@ -18,7 +18,7 @@ generators:
     max_nt: 128
     context_range: ${params.context_range}
     target_range: ${params.target_range}
-    samples_per_epoch: 16_000
+    samples_per_epoch: 16000
     batch_size: 16
 
   val:

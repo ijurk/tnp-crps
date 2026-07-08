@@ -1,0 +1,64 @@
+output_dir: results/synthetic_1d/latent_fork_function_plots
+device: cuda
+
+base_generator_config: experiments/configs/generators/latent_regime_fork_1d.yml
+
+num_plot_samples: 256
+num_sample_paths: 8
+x_range: [-4.0, 4.0]
+points_per_unit: 64
+search_batches: 256
+
+models:
+  - name: Gaussian TNP NLL
+    model_config: external/tnp/experiments/configs/models/tnp_lr_scheduler.yml
+    checkpoint_path: checkpoints/latent_fork/synthetic-1d-latent-regime-fork/latent-fork-gaussian-baseline/default-run/last.ckpt
+    show_sample_paths: false
+    overrides: []
+
+  - name: Dropout CRPS M4 p0.10
+    model_config: experiments/configs/models/tnp_crps_dropout.yml
+    checkpoint_path: checkpoints/latent_fork/synthetic-1d-latent-regime-fork/latent-fork-dropout-m4-p010/default-run/last.ckpt
+    show_sample_paths: true
+    overrides:
+      - params.num_samples=4
+      - params.val_num_samples=10
+      - params.test_num_samples=64
+      - params.p_dropout=0.10
+      - params.crps_alpha=1.0
+
+  - name: StochLN CRPS M4
+    model_config: experiments/configs/models/tnp_crps_stochln.yml
+    checkpoint_path: checkpoints/latent_fork/synthetic-1d-latent-regime-fork/latent-fork-stochln-m4/default-run/last.ckpt
+    show_sample_paths: true
+    overrides:
+      - params.num_samples=4
+      - params.val_num_samples=10
+      - params.test_num_samples=64
+      - params.crps_alpha=1.0
+      - params.layernorm_noise_dim=32
+
+plot_specs:
+  - name: latent_fork_medium_context
+    dataset: latent_fork
+    min_nc: 8
+    max_nc: 24
+    task_index: 0
+    show_targets: true
+    sampling_mode: one-shot
+    resample_dense_ground_truth: true
+    show_ground_truth: true
+    show_realised_task: true
+    show_oracle_posterior: true
+
+  - name: latent_fork_high_context
+    dataset: latent_fork
+    min_nc: 32
+    max_nc: 64
+    task_index: 0
+    show_targets: true
+    sampling_mode: one-shot
+    resample_dense_ground_truth: true
+    show_ground_truth: true
+    show_realised_task: true
+    show_oracle_posterior: true

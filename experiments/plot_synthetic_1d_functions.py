@@ -42,6 +42,53 @@ def parse_args() -> argparse.Namespace:
 def dataclass_replace_batch(batch: Batch, **kwargs) -> Batch:
     return dataclasses.replace(batch, **kwargs)
 
+@torch.no_grad()
+def maybe_resample_batch_for_exact_dense_truth(
+    *,
+    batch: Batch,
+    x_plot: torch.Tensor,
+    enabled: bool = True,
+) -> Batch:
+    """For latent-fork plots, jointly sample task values and dense truth.
+
+    The latent fork generator normally samples only the finite task values.
+    For plotting, once x_plot is known, this resamples the original task inputs
+    and x_plot jointly from the same finite-dimensional GP draw, then replaces
+    the plotted context/target y-values so the orange dense line is exact for
+    the displayed task.
+
+    This is plot-only and does not affect training/evaluation metrics.
+    """
+    if not enabled:
+        return batch
+
+    gt_pred = getattr(batch, "gt_pred", None)
+    if gt_pred is None:
+        return batch
+
+    if not hasattr(gt_pred, "sample_joint_observations_and_latent_function"):
+        return batch
+
+    if not hasattr(batch, "x"):
+        return batch
+
+    regimes = getattr(gt_pred, "sampled_regimes", None)
+
+    y, _ = gt_pred.sample_joint_observations_and_latent_function(
+        x_observed=batch.x,
+        x_plot=x_plot,
+        regimes=regimes,
+        store=True,
+    )
+
+    nc = batch.xc.shape[1]
+
+    return dataclass_replace_batch(
+        batch,
+        y=y,
+        yc=y[:, :nc, :],
+        yt=y[:, nc:, :],
+    )
 
 def load_models(
     *,
@@ -96,7 +143,8 @@ def get_plot_batch(
         overrides=[],
     )
 
-    apply_eval_kernel(config, plot_spec["kernel"])
+    if plot_spec.get("kernel", None) is not None:
+        apply_eval_kernel(config, plot_spec["kernel"])
 
     apply_eval_dataset_overrides(
         config,
@@ -130,9 +178,18 @@ def get_plot_batch(
             continue
 
         if qualifying_seen == task_index:
+            # print(
+            #     f"Selected plot batch for {plot_spec['name']}: "
+            #     f"batch_idx={batch_idx}, nc={nc}, kernel={plot_spec['kernel']}"
+            # )
+            dataset_label = plot_spec.get(
+                "kernel",
+                plot_spec.get("dataset", "native_generator"),
+            )
+            
             print(
                 f"Selected plot batch for {plot_spec['name']}: "
-                f"batch_idx={batch_idx}, nc={nc}, kernel={plot_spec['kernel']}"
+                f"batch_idx={batch_idx}, nc={nc}, dataset={dataset_label}"
             )
             return batch
 
@@ -221,6 +278,12 @@ def make_one_plot(
         dtype=batch.xc.dtype,
     )[None, :, None]
 
+    batch = maybe_resample_batch_for_exact_dense_truth(
+        batch=batch,
+        x_plot=x_plot,
+        enabled=bool(plot_spec.get("resample_dense_ground_truth", True)),
+    )
+
     y_placeholder = torch.zeros_like(x_plot)
 
     plot_batch = dataclass_replace_batch(
@@ -240,9 +303,18 @@ def make_one_plot(
             )
         )
 
+    # title = (
+    #     f"{plot_spec['name']} | kernel={plot_spec['kernel']} | "
+    #     f"Nc={batch.xc.shape[1]}"
+    # )
+
+    dataset_label = plot_spec.get("kernel", plot_spec.get("dataset", "native_generator"))
+
+    sampling_mode = plot_spec.get("sampling_mode", "one-shot")
+
     title = (
-        f"{plot_spec['name']} | kernel={plot_spec['kernel']} | "
-        f"Nc={batch.xc.shape[1]}"
+        f"{plot_spec['name']} | dataset={dataset_label} | "
+        f"sampling={sampling_mode} | Nc={batch.xc.shape[1]}"
     )
 
     y_lim = plot_spec.get("y_lim", None)
@@ -261,6 +333,8 @@ def make_one_plot(
         y_lim=y_lim,
         show_targets=bool(plot_spec.get("show_targets", True)),
         show_ground_truth=bool(plot_spec.get("show_ground_truth", True)),
+        show_realised_task=bool(plot_spec.get("show_realised_task", True)),
+        show_oracle_posterior=bool(plot_spec.get("show_oracle_posterior", True)),
     )
 
 

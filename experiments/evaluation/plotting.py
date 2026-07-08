@@ -16,6 +16,120 @@ matplotlib.rcParams["font.family"] = "STIXGeneral"
 def _to_cpu_1d(x: torch.Tensor) -> torch.Tensor:
     return x.detach().cpu().reshape(-1)
 
+def _first_batch_y_to_cpu_1d(y: torch.Tensor) -> torch.Tensor:
+    if y.ndim == 3:
+        return _to_cpu_1d(y[0, :, 0])
+    if y.ndim == 2:
+        return _to_cpu_1d(y[0])
+    return _to_cpu_1d(y)
+
+
+def _first_batch_x_to_cpu_1d(x: torch.Tensor) -> torch.Tensor:
+    if x.ndim == 3:
+        return _to_cpu_1d(x[0, :, 0])
+    if x.ndim == 2:
+        return _to_cpu_1d(x[0])
+    return _to_cpu_1d(x)
+
+def _realised_task_line(batch) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
+    """Return sorted realised finite task values, if available.
+
+    This is useful as a fallback for processes where no exact dense realised
+    function has been stored.
+    """
+    if not hasattr(batch, "x") or not hasattr(batch, "y"):
+        return None
+
+    x = getattr(batch, "x")
+    y = getattr(batch, "y")
+
+    if x is None or y is None:
+        return None
+
+    x_1d = _to_cpu_1d(x[0, :, 0])
+    y_1d = _to_cpu_1d(y[0, :, 0])
+
+    order = torch.argsort(x_1d)
+    return x_1d[order], y_1d[order]
+
+def _dense_ground_truth_line(
+    batch,
+    x_plot: torch.Tensor,
+) -> Optional[Tuple[torch.Tensor, torch.Tensor, str]]:
+    """Return dense realised ground truth line, if available.
+
+    Priority:
+      1. stored dense_ground_truth_x/y from a jointly sampled latent-fork plot;
+      2. gt_pred.latent_function(x_plot), e.g. sawtooth.
+    """
+    gt_pred = getattr(batch, "gt_pred", None)
+    if gt_pred is None:
+        return None
+
+    label = str(getattr(gt_pred, "dense_ground_truth_label", "GT realised function"))
+
+    stored_y = getattr(gt_pred, "dense_ground_truth_y", None)
+    if stored_y is not None:
+        stored_x = getattr(gt_pred, "dense_ground_truth_x", x_plot)
+        return (
+            _first_batch_x_to_cpu_1d(stored_x),
+            _first_batch_y_to_cpu_1d(stored_y),
+            label,
+        )
+
+    if hasattr(gt_pred, "latent_function"):
+        with torch.no_grad():
+            y_plot = gt_pred.latent_function(x_plot)
+        return (
+            _to_cpu_1d(x_plot[0, :, 0]),
+            _first_batch_y_to_cpu_1d(y_plot),
+            label,
+        )
+
+    return None
+
+def _latent_fork_plot_metadata(batch) -> Dict[str, object]:
+    """Extract latent-fork metadata if present."""
+    gt_pred = getattr(batch, "gt_pred", None)
+    if gt_pred is None:
+        return {}
+
+    out: Dict[str, object] = {}
+
+    if hasattr(gt_pred, "fork_locations"):
+        fork_x = gt_pred.fork_locations.detach().cpu().reshape(-1)
+        if fork_x.numel() > 0:
+            out["fork_x"] = float(fork_x[0])
+
+    sampled_regimes = getattr(gt_pred, "sampled_regimes", None)
+    if sampled_regimes is not None:
+        regime = sampled_regimes.detach().cpu().reshape(-1)
+        if regime.numel() > 0:
+            regime_id = int(regime[0])
+            out["regime_id"] = regime_id
+            if hasattr(gt_pred, "regime_name"):
+                out["regime_name"] = gt_pred.regime_name(regime_id)
+            else:
+                out["regime_name"] = str(regime_id)
+
+    regime_z = getattr(gt_pred, "regime_z", None)
+    if regime_z is not None:
+        z = regime_z.detach().cpu().reshape(-1)
+        if z.numel() > 0:
+            out["regime_z"] = int(z[0])
+
+    for attr, key in [
+        ("delta", "delta"),
+        ("transition_width", "transition_width"),
+        ("base_scale", "base_scale"),
+    ]:
+        if hasattr(gt_pred, attr):
+            try:
+                out[key] = float(getattr(gt_pred, attr))
+            except TypeError:
+                pass
+
+    return out
 
 def _prediction_bundle(row: Dict) -> Dict[str, Optional[torch.Tensor]]:
     """Return mean, quantiles and optional sample paths for plotting.
@@ -53,12 +167,12 @@ def _prediction_bundle(row: Dict) -> Dict[str, Optional[torch.Tensor]]:
         "q975": _to_cpu_1d(row["q975"]),
     }
 
-
 def _compute_y_limits(
     *,
     batch,
     prediction_rows: List[Dict],
     padding_fraction: float = 0.08,
+    extra_values: Optional[List[torch.Tensor]] = None,
 ) -> Tuple[float, float]:
     values = [
         _to_cpu_1d(batch.yc[..., 0]),
@@ -69,6 +183,11 @@ def _compute_y_limits(
         bundle = _prediction_bundle(row)
         values.extend([bundle["q025"], bundle["q975"]])
 
+    if extra_values is not None:
+        for value in extra_values:
+            if value is not None:
+                values.append(_to_cpu_1d(value))
+
     all_values = torch.cat(values)
     y_min = float(all_values.min())
     y_max = float(all_values.max())
@@ -78,7 +197,6 @@ def _compute_y_limits(
 
     pad = padding_fraction * (y_max - y_min)
     return y_min - pad, y_max + pad
-
 
 def plot_function_comparison(
     *,
@@ -92,6 +210,8 @@ def plot_function_comparison(
     figsize_per_row: Tuple[float, float] = (8.0, 3.0),
     show_targets: bool = True,
     show_ground_truth: bool = True,
+    show_realised_task: bool = True,
+    show_oracle_posterior: bool = True,
 ) -> None:
     """Plot model sample paths and empirical/analytic quantile bands for one 1D task.
 
@@ -124,14 +244,43 @@ def plot_function_comparison(
     xt = _to_cpu_1d(batch.xt[0, :, 0])
     yt = _to_cpu_1d(batch.yt[0, :, 0])
 
+    dense_ground_truth = (
+        _dense_ground_truth_line(batch, x_plot)
+        if show_ground_truth
+        else None
+    )
+    realised_task = (
+        _realised_task_line(batch)
+        if show_realised_task
+        else None
+    )
+    latent_meta = _latent_fork_plot_metadata(batch)
+
+    extra_y_values: List[torch.Tensor] = []
+    if dense_ground_truth is not None:
+        extra_y_values.append(dense_ground_truth[1])
+    elif realised_task is not None:
+        extra_y_values.append(realised_task[1])
+
     if y_lim is None:
-        y_lim = _compute_y_limits(batch=batch, prediction_rows=prediction_rows)
+        y_lim = _compute_y_limits(
+            batch=batch,
+            prediction_rows=prediction_rows,
+            extra_values=extra_y_values,
+        )
 
     gt_mean = None
     gt_std = None
 
+    gt_pred = getattr(batch, "gt_pred", None)
+    plot_posterior_summary = bool(
+        getattr(gt_pred, "plot_posterior_summary", True)
+    )
+
     if (
         show_ground_truth
+        and show_oracle_posterior
+        and plot_posterior_summary
         and isinstance(batch, SyntheticBatch)
         and batch.gt_pred is not None
     ):
@@ -151,13 +300,13 @@ def plot_function_comparison(
         sample_paths = bundle["sample_paths"]
         mean = bundle["mean"]
         q025 = bundle["q025"]
-        q10 = bundle["q10"]
-        q25 = bundle["q25"]
-        q75 = bundle["q75"]
-        q90 = bundle["q90"]
         q975 = bundle["q975"]
 
         show_sample_paths = bool(row.get("show_sample_paths", True))
+
+        # Lightly shade extrapolation regions behind everything else.
+        ax.axvspan(-4.0, -2.0, color="0.95", zorder=-10)
+        ax.axvspan(2.0, 4.0, color="0.95", zorder=-10)
 
         if show_sample_paths and sample_paths is not None:
             max_paths = min(num_sample_paths, sample_paths.shape[0])
@@ -165,32 +314,20 @@ def plot_function_comparison(
                 ax.plot(
                     x_dense,
                     sample_paths[sample_idx],
-                    color="0.65",
-                    alpha=0.20,
-                    linewidth=0.6,
+                    color="0.55",
+                    alpha=0.28,
+                    linewidth=0.70,
                     label="Predictive sample paths" if sample_idx == 0 else None,
+                    zorder=1,
                 )
 
         ax.fill_between(
             x_dense,
             q025,
             q975,
-            alpha=0.16,
+            alpha=0.20,
             label="95% interval",
-        )
-        ax.fill_between(
-            x_dense,
-            q10,
-            q90,
-            alpha=0.22,
-            label="80% interval",
-        )
-        ax.fill_between(
-            x_dense,
-            q25,
-            q75,
-            alpha=0.32,
-            label="50% interval",
+            zorder=0,
         )
 
         # Predictive mean, matching RMSE evaluation.
@@ -199,7 +336,31 @@ def plot_function_comparison(
             mean,
             linewidth=2.2,
             label="Predictive mean",
+            zorder=3,
         )
+
+        if dense_ground_truth is not None:
+            gt_x, gt_y, gt_label = dense_ground_truth
+            ax.plot(
+                gt_x,
+                gt_y,
+                color="tab:orange",
+                linewidth=2.0,
+                alpha=0.95,
+                label=gt_label,
+                zorder=4,
+            )
+        elif realised_task is not None:
+            realised_x, realised_y = realised_task
+            ax.plot(
+                realised_x,
+                realised_y,
+                color="tab:orange",
+                linewidth=1.4,
+                alpha=0.85,
+                label="Realised task values",
+                zorder=2,
+            )
 
         if gt_mean is not None and gt_std is not None:
             ax.plot(
@@ -209,6 +370,7 @@ def plot_function_comparison(
                 linewidth=1.8,
                 color="tab:purple",
                 label="GT posterior mean",
+                zorder=3,
             )
             ax.plot(
                 x_dense,
@@ -217,6 +379,7 @@ def plot_function_comparison(
                 linewidth=1.2,
                 color="tab:purple",
                 alpha=0.8,
+                zorder=3,
             )
             ax.plot(
                 x_dense,
@@ -226,6 +389,18 @@ def plot_function_comparison(
                 color="tab:purple",
                 alpha=0.8,
                 label="GT ±2 std",
+                zorder=3,
+            )
+
+        if "fork_x" in latent_meta:
+            ax.axvline(
+                float(latent_meta["fork_x"]),
+                color="tab:green",
+                linestyle=":",
+                linewidth=1.8,
+                alpha=0.9,
+                label="Fork",
+                zorder=4,
             )
 
         ax.scatter(
@@ -233,7 +408,7 @@ def plot_function_comparison(
             yc,
             color="black",
             s=24,
-            zorder=5,
+            zorder=6,
             label="Context",
         )
 
@@ -244,20 +419,39 @@ def plot_function_comparison(
                 color="tab:red",
                 s=12,
                 alpha=0.35,
-                zorder=4,
+                zorder=5,
                 label="Targets",
             )
-
-        # Lightly shade extrapolation regions.
-        ax.axvspan(-4.0, -2.0, color="0.95", zorder=-10)
-        ax.axvspan(2.0, 4.0, color="0.95", zorder=-10)
 
         ax.set_ylim(y_lim)
         ax.set_xlim(float(x_dense.min()), float(x_dense.max()))
         ax.set_ylabel(model_name)
         ax.grid(True, alpha=0.35)
 
-    axes[0].set_title(title)
+    title_bits = [title]
+
+    if "regime_id" in latent_meta:
+        if "regime_z" in latent_meta:
+            title_bits.append(
+                f"regime={latent_meta['regime_name']} "
+                f"(z={int(latent_meta['regime_z']):+d})"
+            )
+        else:
+            title_bits.append(
+                f"regime={latent_meta['regime_name']} "
+                f"(id={latent_meta['regime_id']})"
+            )
+            
+    if "fork_x" in latent_meta:
+        title_bits.append(f"fork x0={latent_meta['fork_x']:.3f}")
+
+    if "delta" in latent_meta:
+        title_bits.append(f"delta={latent_meta['delta']:.2f}")
+
+    if "transition_width" in latent_meta:
+        title_bits.append(f"tw={latent_meta['transition_width']:.2f}")
+
+    axes[0].set_title(" | ".join(title_bits))
     axes[-1].set_xlabel("x")
 
     handles = []
@@ -276,12 +470,182 @@ def plot_function_comparison(
         by_label.values(),
         by_label.keys(),
         loc="upper center",
-        ncol=4,
+        ncol=min(5, max(1, len(by_label))),
         fontsize=9,
         bbox_to_anchor=(0.5, 1.0),
     )
 
     fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.93))
+
+    png_path = output_path_base.with_suffix(".png")
+    pdf_path = output_path_base.with_suffix(".pdf")
+
+    fig.savefig(png_path, dpi=250, bbox_inches="tight")
+    fig.savefig(pdf_path, bbox_inches="tight")
+    plt.close(fig)
+
+    print(f"Saved {png_path}")
+    print(f"Saved {pdf_path}")
+
+def plot_predictive_histogram_comparison(
+    *,
+    batch,
+    x_hist: torch.Tensor,
+    prediction_rows: List[Dict],
+    output_path_base: Path,
+    title: str,
+    num_oracle_samples: int = 2048,
+    bins: int = 50,
+) -> None:
+    """Plot predictive histograms as a model-by-location grid.
+
+    Layout:
+        rows    = models
+        columns = selected x locations
+
+    Each panel overlays only:
+        - oracle posterior samples, if available
+        - the corresponding model samples
+
+    This is much cleaner than overlaying all models in the same panel.
+    """
+    import numpy as np
+
+    if batch.xc.shape[0] != 1:
+        raise ValueError("plot_predictive_histogram_comparison expects batch size 1.")
+
+    output_path_base.parent.mkdir(parents=True, exist_ok=True)
+
+    x_values = _to_cpu_1d(x_hist[0, :, 0])
+    num_locations = int(x_values.numel())
+    num_models = len(prediction_rows)
+
+    fig, axes = plt.subplots(
+        num_models,
+        num_locations,
+        figsize=(4.2 * num_locations, 2.6 * num_models),
+        squeeze=False,
+        sharex="col",
+        sharey="col",
+    )
+
+    oracle_samples = None
+    if (
+        isinstance(batch, SyntheticBatch)
+        and batch.gt_pred is not None
+        and hasattr(batch.gt_pred, "predictive_samples")
+    ):
+        with torch.no_grad():
+            oracle_samples = batch.gt_pred.predictive_samples(
+                batch.xc,
+                batch.yc,
+                x_hist,
+                num_samples=num_oracle_samples,
+            )
+        oracle_samples = oracle_samples.detach().cpu()  # [M, 1, K, 1]
+
+    # Compute common bin edges per column/location.
+    # This makes row-by-row comparison visually fair.
+    column_bin_edges = []
+
+    for loc_idx in range(num_locations):
+        vals_for_column = []
+
+        if oracle_samples is not None:
+            vals_for_column.append(
+                oracle_samples[:, 0, loc_idx, 0].reshape(-1).numpy()
+            )
+
+        for row in prediction_rows:
+            samples = row.get("samples", None)
+            if samples is not None:
+                vals_for_column.append(
+                    samples[:, 0, loc_idx, 0]
+                    .detach()
+                    .cpu()
+                    .reshape(-1)
+                    .numpy()
+                )
+
+        all_vals = np.concatenate(vals_for_column)
+        column_bin_edges.append(np.histogram_bin_edges(all_vals, bins=bins))
+
+    for model_idx, row in enumerate(prediction_rows):
+        model_name = row["name"]
+        samples = row.get("samples", None)
+
+        if samples is None:
+            continue
+
+        for loc_idx, ax in enumerate(axes[model_idx]):
+            bin_edges = column_bin_edges[loc_idx]
+
+            if oracle_samples is not None:
+                oracle_vals = (
+                    oracle_samples[:, 0, loc_idx, 0]
+                    .reshape(-1)
+                    .numpy()
+                )
+
+                ax.hist(
+                    oracle_vals,
+                    bins=bin_edges,
+                    density=True,
+                    alpha=0.45,
+                    label="Oracle",
+                )
+
+            model_vals = (
+                samples[:, 0, loc_idx, 0]
+                .detach()
+                .cpu()
+                .reshape(-1)
+                .numpy()
+            )
+
+            ax.hist(
+                model_vals,
+                bins=bin_edges,
+                density=True,
+                alpha=0.45,
+                label=model_name,
+            )
+
+            if model_idx == 0:
+                ax.set_title(f"x = {float(x_values[loc_idx]):.2f}")
+
+            if loc_idx == 0:
+                ax.set_ylabel(model_name)
+
+            if model_idx == num_models - 1:
+                ax.set_xlabel("y")
+
+            ax.grid(True, alpha=0.25)
+
+    # Collect legend entries from all panels.
+    handles = []
+    labels = []
+    for ax in axes.reshape(-1):
+        h, l = ax.get_legend_handles_labels()
+        handles.extend(h)
+        labels.extend(l)
+
+    by_label = {}
+    for h, l in zip(handles, labels):
+        if l not in by_label:
+            by_label[l] = h
+
+    fig.legend(
+        by_label.values(),
+        by_label.keys(),
+        loc="upper center",
+        ncol=min(4, len(by_label)),
+        fontsize=9,
+        bbox_to_anchor=(0.5, 1.02),
+    )
+
+    fig.suptitle(title, y=1.06, fontsize=14)
+    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
 
     png_path = output_path_base.with_suffix(".png")
     pdf_path = output_path_base.with_suffix(".pdf")

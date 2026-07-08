@@ -1,0 +1,40 @@
+output_dir: results/synthetic_1d/sawtooth_ambiguous_eval
+device: cuda
+
+num_eval_samples: 64
+
+samples_per_eval_set: 4096
+eval_batch_size: 16
+max_batches: null
+
+base_generator_config: experiments/configs/generators/sawtooth_1d_ambiguous.yml
+
+eval_sets:
+  - name: sawtooth_ambiguous
+    kernel: null
+
+models:
+  - name: sawtooth_ambiguous_gaussian_tnp_nll
+    model_config: external/tnp/experiments/configs/models/tnp_lr_scheduler.yml
+    checkpoint_path: checkpoints/sawtooth_ambiguous/synthetic-1d-sawtooth-ambiguous/sawtooth-ambiguous-gaussian-baseline/ambiguous-v2/last.ckpt
+    overrides: []
+
+  - name: sawtooth_ambiguous_dropout_crps_m4_p010
+    model_config: experiments/configs/models/tnp_crps_dropout.yml
+    checkpoint_path: checkpoints/sawtooth_ambiguous/synthetic-1d-sawtooth-ambiguous/sawtooth-ambiguous-dropout-m4-p010/ambiguous-v2/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.val_num_samples=10
+      - params.test_num_samples=64
+      - params.p_dropout=0.10
+      - params.crps_alpha=1.0
+
+  - name: sawtooth_ambiguous_stochln_crps_m4
+    model_config: experiments/configs/models/tnp_crps_stochln.yml
+    checkpoint_path: checkpoints/sawtooth_ambiguous/synthetic-1d-sawtooth-ambiguous/sawtooth-ambiguous-stochln-m4/ambiguous-v2/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.val_num_samples=10
+      - params.test_num_samples=64
+      - params.crps_alpha=1.0
+      - params.layernorm_noise_dim=32

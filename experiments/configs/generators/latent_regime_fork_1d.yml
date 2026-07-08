@@ -22,7 +22,7 @@ generators:
     max_nc: 64
     min_nt: 128
     max_nt: 128
-    samples_per_epoch: 16_000
+    samples_per_epoch: 16000
     batch_size: 16
 
   val:
@@ -90,6 +90,8 @@ matern52_kernel:
 params:
   dim_x: 1
   dim_y: 1
+  context_range: [[-4.0, 1.0]]
+  target_range: [[-4.0, 4.0]]
   min_log10_lengthscale: -0.602
   max_log10_lengthscale: 0.0
 

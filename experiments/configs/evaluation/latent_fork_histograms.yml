@@ -1,0 +1,50 @@
+output_dir: results/synthetic_1d/latent_fork_histograms
+device: cuda
+
+base_generator_config: experiments/configs/generators/latent_regime_fork_1d.yml
+
+num_hist_samples: 1024
+num_oracle_samples: 4096
+bins: 55
+search_batches: 512
+
+models:
+  - name: Gaussian TNP NLL
+    model_config: external/tnp/experiments/configs/models/tnp_lr_scheduler.yml
+    checkpoint_path: checkpoints/latent_fork/synthetic-1d-latent-regime-fork/latent-fork-gaussian-baseline/default-run/last.ckpt
+    overrides: []
+
+  - name: Dropout CRPS M4 p0.10
+    model_config: experiments/configs/models/tnp_crps_dropout.yml
+    checkpoint_path: checkpoints/latent_fork/synthetic-1d-latent-regime-fork/latent-fork-dropout-m4-p010/default-run/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.val_num_samples=10
+      - params.test_num_samples=64
+      - params.p_dropout=0.10
+      - params.crps_alpha=1.0
+
+  - name: StochLN CRPS M4
+    model_config: experiments/configs/models/tnp_crps_stochln.yml
+    checkpoint_path: checkpoints/latent_fork/synthetic-1d-latent-regime-fork/latent-fork-stochln-m4/default-run/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.val_num_samples=10
+      - params.test_num_samples=64
+      - params.crps_alpha=1.0
+      - params.layernorm_noise_dim=32
+
+hist_specs:
+  - name: latent_fork_hist_medium_context
+    dataset: latent_fork
+    min_nc: 8
+    max_nc: 24
+    task_index: 0
+    x_locations: [1.0, 2.5, 3.5]
+
+  - name: latent_fork_hist_high_context
+    dataset: latent_fork
+    min_nc: 32
+    max_nc: 64
+    task_index: 0
+    x_locations: [1.0, 2.5, 3.5]
