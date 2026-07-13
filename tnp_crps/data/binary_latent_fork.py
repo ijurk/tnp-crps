@@ -928,3 +928,196 @@ class BinaryLatentForkGenerator(
     SyntheticGeneratorUniformInput,
 ):
     pass
+
+
+class BinaryLatentForkGeneratorMixedContext(BinaryLatentForkGenerator):
+    """Mixture of ambiguous and regime-revealing context tasks.
+
+    Ambiguous family, with probability 1 - p_revealing:
+        Every context input is sampled from the ordinary pre-fork
+        context_range. These are the original binary-fork acid-test tasks.
+
+    Revealing family, with probability p_revealing:
+        Context inputs are sampled across full_context_range. One randomly
+        selected context input is then overwritten by a location at or beyond
+        the completed fork transition, guaranteeing that the context reveals
+        the global regime.
+
+    Target sampling is unchanged.
+
+    Validation and test should continue to use BinaryLatentForkGenerator with
+    pre-fork-only contexts. This subclass is intended for training only.
+    """
+
+    def __init__(
+        self,
+        *,
+        p_revealing: float = 0.5,
+        full_context_range: Optional[
+            Tuple[Tuple[float, float], ...]
+        ] = None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+
+        p_revealing = float(p_revealing)
+
+        if not 0.0 <= p_revealing <= 1.0:
+            raise ValueError(
+                "p_revealing must be in [0, 1], "
+                f"got {p_revealing}."
+            )
+
+        self.p_revealing = p_revealing
+
+        if full_context_range is None:
+            self.full_context_range = self.target_range.clone()
+        else:
+            # Convert ListConfig/list/tuple inputs robustly.
+            range_values = [
+                [float(value) for value in row]
+                for row in full_context_range
+            ]
+
+            self.full_context_range = torch.tensor(
+                range_values,
+                dtype=self.context_range.dtype,
+                device=self.context_range.device,
+            )
+
+        if self.full_context_range.shape != self.context_range.shape:
+            raise ValueError(
+                "full_context_range must match context_range shape. "
+                f"Got {tuple(self.full_context_range.shape)} versus "
+                f"{tuple(self.context_range.shape)}."
+            )
+
+        # The exact-zero smoothstep gate is fully active for:
+        #
+        #     x >= fork_x0 + transition_width
+        #
+        # A point sampled from this interval therefore contains full regime
+        # information.
+        self.reveal_min = (
+            float(self.fork_x0)
+            + float(self.transition_width)
+        )
+        self.reveal_max = float(self.full_context_range[0, 1])
+
+        if not self.reveal_min < self.reveal_max:
+            raise ValueError(
+                "No interval is available for a revealing context point. "
+                "Expected fork_x0 + transition_width to be below the "
+                "full-context upper bound, but got "
+                f"reveal_min={self.reveal_min} and "
+                f"reveal_max={self.reveal_max}."
+            )
+
+    def sample_inputs(
+        self,
+        nc: int,
+        batch_shape: torch.Size,
+        nt: Optional[int] = None,
+    ) -> torch.Tensor:
+        nc = int(nc)
+
+        if nc < 1:
+            raise ValueError(
+                "Mixed-context training requires nc >= 1, "
+                f"got nc={nc}."
+            )
+
+        batch_shape_tuple = tuple(batch_shape)
+
+        rand_kwargs = {
+            "device": self.context_range.device,
+            "dtype": self.context_range.dtype,
+        }
+
+        # Original ambiguous, pre-fork context family.
+        xc_pre = (
+            torch.rand(
+                (*batch_shape_tuple, nc, self.dim),
+                **rand_kwargs,
+            )
+            * (
+                self.context_range[:, 1]
+                - self.context_range[:, 0]
+            )
+            + self.context_range[:, 0]
+        )
+
+        # Broad context family, including the pre-fork, transition, and
+        # post-fork regions.
+        xc_full = (
+            torch.rand(
+                (*batch_shape_tuple, nc, self.dim),
+                **rand_kwargs,
+            )
+            * (
+                self.full_context_range[:, 1]
+                - self.full_context_range[:, 0]
+            )
+            + self.full_context_range[:, 0]
+        )
+
+        # Draw one guaranteed fully post-transition context point per task.
+        x_reveal = (
+            torch.rand(
+                (*batch_shape_tuple, 1, self.dim),
+                **rand_kwargs,
+            )
+            * (self.reveal_max - self.reveal_min)
+            + self.reveal_min
+        )
+
+        reveal_idx = torch.randint(
+            low=0,
+            high=nc,
+            size=batch_shape_tuple,
+            device=xc_full.device,
+        )
+
+        reveal_mask = torch.nn.functional.one_hot(
+            reveal_idx,
+            num_classes=nc,
+        ).bool().unsqueeze(-1)
+
+        # x_reveal broadcasts from [..., 1, dim] to [..., nc, dim].
+        xc_revealing = torch.where(
+            reveal_mask,
+            x_reveal,
+            xc_full,
+        )
+
+        # Choose the context family independently for every task.
+        use_revealing = (
+            torch.rand(
+                (*batch_shape_tuple, 1, 1),
+                **rand_kwargs,
+            )
+            < self.p_revealing
+        )
+
+        xc = torch.where(
+            use_revealing,
+            xc_revealing,
+            xc_pre,
+        )
+
+        if nt is None:
+            return xc
+
+        xt = (
+            torch.rand(
+                (*batch_shape_tuple, int(nt), self.dim),
+                **rand_kwargs,
+            )
+            * (
+                self.target_range[:, 1]
+                - self.target_range[:, 0]
+            )
+            + self.target_range[:, 0]
+        )
+
+        return torch.cat([xc, xt], dim=1)
