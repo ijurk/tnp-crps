@@ -11,7 +11,10 @@ from omegaconf import OmegaConf
 from tnp.data.base import Batch
 
 from evaluate_synthetic_1d import move_batch_to_device
-from evaluation.autoregressive import autoregressive_sample_model
+from evaluation.autoregressive import (
+    autoregressive_sample_model,
+    denoise_autoregressive_samples,
+)
 from evaluation.plotting import plot_function_comparison
 from plot_synthetic_1d_functions import (
     dataclass_replace_batch,
@@ -38,9 +41,47 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--target_order",
         default="ascending",
-        choices=["ascending", "descending", "given"],
+        choices=[
+            "ascending",
+            "descending",
+            "given",
+            "nearest_context",
+            "random",
+        ],
         type=str,
         help="Order in which target locations are autoregressively sampled.",
+    )
+
+    parser.add_argument(
+        "--stochln_noise_mode",
+        default="refresh",
+        choices=["refresh", "fixed"],
+        type=str,
+        help=(
+            "How to handle StochLN noise during AR. "
+            "'refresh' resamples at every AR step and is the main/default mode. "
+            "'fixed' reuses one StochLN noise vector per rollout path and should "
+            "be treated as an ablation."
+        ),
+    )
+
+    parser.add_argument(
+        "--denoise_ar_samples",
+        action="store_true",
+        help=(
+            "After raw AR sampling, condition on each sampled rollout and plot "
+            "the predictive mean as the smoothed/denoised sample path."
+        ),
+    )
+
+    parser.add_argument(
+        "--num_denoise_samples",
+        default=32,
+        type=int,
+        help=(
+            "Number of stochastic samples used to approximate the denoising "
+            "predictive mean for DirectTNP/CRPS models."
+        ),
     )
 
     parser.add_argument("--max_plots", default=None, type=int)
@@ -64,17 +105,33 @@ def make_ar_prediction_row(
     plot_batch: Batch,
     num_ar_samples: int,
     target_order: str,
+    stochln_noise_mode: str,
+    denoise_ar_samples: bool,
+    num_denoise_samples: int,
 ) -> Dict[str, Any]:
     """Create one AR prediction row for plotting."""
-    samples = autoregressive_sample_model(
+    raw_samples = autoregressive_sample_model(
         model=item["model"],
         batch=plot_batch,
         num_samples=num_ar_samples,
         target_order=target_order,  # type: ignore[arg-type]
+        stochln_noise_mode=stochln_noise_mode,  # type: ignore[arg-type]
     )
 
+    if denoise_ar_samples:
+        samples = denoise_autoregressive_samples(
+            model=item["model"],
+            batch=plot_batch,
+            ar_samples=raw_samples,
+            num_denoise_samples=num_denoise_samples,
+        )
+        row_suffix = "AR denoised"
+    else:
+        samples = raw_samples
+        row_suffix = "AR raw"
+
     return {
-        "name": f"{item['name']} AR",
+        "name": f"{item['name']} {row_suffix}",
         "samples": samples,
         # For AR plots, show sample paths for all models, including Gaussian.
         # AR samples are function-level rollouts, so these paths are informative.
@@ -96,6 +153,9 @@ def make_one_ar_plot(
     x_range: List[float],
     points_per_unit: int,
     target_order: str,
+    stochln_noise_mode: str,
+    denoise_ar_samples: bool,
+    num_denoise_samples: int,
     include_one_shot: bool,
 ) -> None:
     batch = move_batch_to_device(batch, device)
@@ -112,10 +172,11 @@ def make_one_ar_plot(
         dtype=batch.xc.dtype,
     )[None, :, None]
 
-    # For latent fork plots, this creates/stores exact dense realised truth
-    # via joint finite-dimensional GP sampling.
+    # For latent/binary fork plots, this creates/stores exact dense realised truth
+    # via joint finite-dimensional sampling when enabled.
     #
-    # For sawtooth plots, dense truth is handled by gt_pred.latent_function.
+    # For sawtooth plots, dense truth is handled by gt_pred.latent_function if
+    # available.
     batch = maybe_resample_batch_for_exact_dense_truth(
         batch=batch,
         x_plot=x_plot,
@@ -154,6 +215,9 @@ def make_one_ar_plot(
                 plot_batch=plot_batch,
                 num_ar_samples=num_ar_samples,
                 target_order=target_order,
+                stochln_noise_mode=stochln_noise_mode,
+                denoise_ar_samples=denoise_ar_samples,
+                num_denoise_samples=num_denoise_samples,
             )
         )
 
@@ -162,10 +226,16 @@ def make_one_ar_plot(
         plot_spec.get("dataset", "native_generator"),
     )
 
+    ar_label = (
+        f"AR-denoised({target_order}, noise={stochln_noise_mode})"
+        if denoise_ar_samples
+        else f"AR-raw({target_order}, noise={stochln_noise_mode})"
+    )
+
     sampling_label = (
-        f"one-shot vs AR({target_order})"
+        f"one-shot vs {ar_label}"
         if include_one_shot
-        else f"AR({target_order})"
+        else ar_label
     )
 
     title = (
@@ -192,6 +262,7 @@ def make_one_ar_plot(
         show_ground_truth=bool(plot_spec.get("show_ground_truth", True)),
         show_realised_task=bool(plot_spec.get("show_realised_task", True)),
         show_oracle_posterior=bool(plot_spec.get("show_oracle_posterior", True)),
+        training_ranges=plot_spec.get("training_ranges", None),
     )
 
 
@@ -251,6 +322,9 @@ def main() -> None:
                     "points_per_unit": args.points_per_unit,
                     "num_sample_paths": args.num_sample_paths,
                     "target_order": args.target_order,
+                    "stochln_noise_mode": args.stochln_noise_mode,
+                    "denoise_ar_samples": args.denoise_ar_samples,
+                    "num_denoise_samples": args.num_denoise_samples,
                     "max_plots": args.max_plots,
                     "only_plot": args.only_plot,
                     "include_one_shot": args.include_one_shot,
@@ -307,6 +381,9 @@ def main() -> None:
             x_range=cfg["x_range"],
             points_per_unit=points_per_unit,
             target_order=args.target_order,
+            stochln_noise_mode=args.stochln_noise_mode,
+            denoise_ar_samples=bool(args.denoise_ar_samples),
+            num_denoise_samples=int(args.num_denoise_samples),
             include_one_shot=bool(args.include_one_shot),
         )
 

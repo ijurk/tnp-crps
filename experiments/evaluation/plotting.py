@@ -198,6 +198,54 @@ def _compute_y_limits(
     pad = padding_fraction * (y_max - y_min)
     return y_min - pad, y_max + pad
 
+def _normalise_training_ranges(
+    training_ranges: Optional[List[List[float]]],
+) -> List[Tuple[float, float]]:
+    if training_ranges is None:
+        return []
+
+    out = []
+
+    for item in training_ranges:
+        if len(item) != 2:
+            raise ValueError(
+                f"Each training range must have length 2, got {item}."
+            )
+
+        lo = float(item[0])
+        hi = float(item[1])
+
+        if hi <= lo:
+            raise ValueError(
+                f"Invalid training range [{lo}, {hi}]."
+            )
+
+        out.append((lo, hi))
+
+    return out
+
+
+def _shade_training_ranges(
+    *,
+    ax,
+    training_ranges: Optional[List[List[float]]],
+    x_min: float,
+    x_max: float,
+) -> None:
+    for lo, hi in _normalise_training_ranges(training_ranges):
+        lo = max(lo, x_min)
+        hi = min(hi, x_max)
+
+        if hi > lo:
+            ax.axvspan(
+                lo,
+                hi,
+                facecolor="0.93",
+                edgecolor="none",
+                alpha=1.0,
+                zorder=0,
+            )
+
 def plot_function_comparison(
     *,
     batch,
@@ -212,6 +260,7 @@ def plot_function_comparison(
     show_ground_truth: bool = True,
     show_realised_task: bool = True,
     show_oracle_posterior: bool = True,
+    training_ranges: Optional[List[List[float]]] = None,
 ) -> None:
     """Plot model sample paths and empirical/analytic quantile bands for one 1D task.
 
@@ -304,9 +353,37 @@ def plot_function_comparison(
 
         show_sample_paths = bool(row.get("show_sample_paths", True))
 
-        # Lightly shade extrapolation regions behind everything else.
-        ax.axvspan(-4.0, -2.0, color="0.95", zorder=-10)
-        ax.axvspan(2.0, 4.0, color="0.95", zorder=-10)
+        # Shade the training / interpolation window(s).
+        # White regions are extrapolation.
+        if training_ranges is not None:
+            x_min = float(x_dense.min())
+            x_max = float(x_dense.max())
+
+            for range_item in training_ranges:
+                if len(range_item) != 2:
+                    raise ValueError(
+                        f"Each training range must have length 2, got {range_item}."
+                    )
+
+                lo = float(range_item[0])
+                hi = float(range_item[1])
+
+                if hi <= lo:
+                    raise ValueError(
+                        f"Invalid training range [{lo}, {hi}]."
+                    )
+
+                lo = max(lo, x_min)
+                hi = min(hi, x_max)
+
+                if hi > lo:
+                    ax.axvspan(
+                        lo,
+                        hi,
+                        color="0.93",
+                        alpha=1.0,
+                        zorder=-10,
+                    )
 
         if show_sample_paths and sample_paths is not None:
             max_paths = min(num_sample_paths, sample_paths.shape[0])
@@ -314,9 +391,9 @@ def plot_function_comparison(
                 ax.plot(
                     x_dense,
                     sample_paths[sample_idx],
-                    color="0.55",
-                    alpha=0.28,
-                    linewidth=0.70,
+                    color="0.45",
+                    alpha=0.30,
+                    linewidth=0.80,
                     label="Predictive sample paths" if sample_idx == 0 else None,
                     zorder=1,
                 )

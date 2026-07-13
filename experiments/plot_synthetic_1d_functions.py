@@ -335,6 +335,7 @@ def make_one_plot(
         show_ground_truth=bool(plot_spec.get("show_ground_truth", True)),
         show_realised_task=bool(plot_spec.get("show_realised_task", True)),
         show_oracle_posterior=bool(plot_spec.get("show_oracle_posterior", True)),
+        training_ranges=plot_spec.get("training_ranges", None),
     )
 
 

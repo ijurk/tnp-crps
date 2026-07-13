@@ -50,6 +50,8 @@ plot_specs:
     show_ground_truth: true
     show_realised_task: true
     show_oracle_posterior: true
+    training_ranges:
+      - [-4.0, -0.25]
 
   - name: binary_latent_fork_example_1
     dataset: binary_latent_fork
@@ -62,6 +64,9 @@ plot_specs:
     show_ground_truth: true
     show_realised_task: true
     show_oracle_posterior: true
+    training_ranges:
+      - [-4.0, -0.25]
+    
 
   - name: binary_latent_fork_example_2
     dataset: binary_latent_fork
@@ -74,6 +79,8 @@ plot_specs:
     show_ground_truth: true
     show_realised_task: true
     show_oracle_posterior: true
+    training_ranges:
+      - [-4.0, -0.25]
 
   - name: binary_latent_fork_example_3
     dataset: binary_latent_fork
@@ -86,3 +93,5 @@ plot_specs:
     show_ground_truth: true
     show_realised_task: true
     show_oracle_posterior: true
+    training_ranges:
+      - [-4.0, -0.25]

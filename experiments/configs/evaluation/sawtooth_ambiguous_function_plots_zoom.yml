@@ -5,7 +5,7 @@ base_generator_config: experiments/configs/generators/sawtooth_1d_ambiguous.yml
 
 num_plot_samples: 256
 num_sample_paths: 8
-x_range: [-4.0, 4.0]
+x_range: [-1.0, 1.0]
 points_per_unit: 100
 search_batches: 1024
 
@@ -47,8 +47,6 @@ plot_specs:
     show_ground_truth: true
     show_realised_task: true
     show_oracle_posterior: false
-    training_ranges:
-      - [-0.25, 0.25]
 
   - name: sawtooth_ambiguous_low_context_1
     dataset: sawtooth_ambiguous
@@ -58,8 +56,6 @@ plot_specs:
     show_ground_truth: true
     show_realised_task: true
     show_oracle_posterior: false
-    training_ranges:
-      - [-0.25, 0.25]
 
   - name: sawtooth_ambiguous_medium_context_0
     dataset: sawtooth_ambiguous
@@ -70,8 +66,6 @@ plot_specs:
     show_ground_truth: true
     show_realised_task: true
     show_oracle_posterior: false
-    training_ranges:
-      - [-0.25, 0.25]
 
   - name: sawtooth_ambiguous_medium_context_1
     dataset: sawtooth_ambiguous
@@ -82,5 +76,3 @@ plot_specs:
     show_ground_truth: true
     show_realised_task: true
     show_oracle_posterior: false
-    training_ranges:
-      - [-0.25, 0.25]
