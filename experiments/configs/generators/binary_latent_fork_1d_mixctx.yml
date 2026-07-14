@@ -67,10 +67,12 @@ params:
   dim_x: 1
   dim_y: 1
 
-  # Context is strictly pre-fork and separated from the transition.
+  # Context range for the ambiguous training family and for all validation/test
+  # tasks. It is strictly pre-fork and separated from the transition.
   context_range: [[-4.0, -0.25]]
 
-  # Targets show both the shared pre-fork history and post-fork futures.
+  # Target range for all splits. The mixed training generator also uses this
+  # as full_context_range for its revealing-context task family.
   target_range: [[-4.0, 4.0]]
 
 misc:

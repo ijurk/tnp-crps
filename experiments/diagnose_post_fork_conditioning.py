@@ -2,8 +2,10 @@ from __future__ import annotations
 
 """Diagnostic: do trained models condition on a post-fork context point?
 
-Training uses context_range = [[-4.0, -0.25]], so the models have never seen a
-context point past the fork. AR coherence requires conditioning on the model's
+This diagnostic tests whether a trained model uses a single post-fork context
+observation to infer and propagate the global binary regime. It can be used to
+compare models trained with pre-fork-only contexts against models trained with
+mixed ambiguous/revealing contexts. AR coherence requires conditioning on the model's
 own post-fork samples. This script tests that capability directly, without any
 AR machinery:
 
@@ -27,15 +29,15 @@ Interpretation (decision rule):
       The injected location x = 1.0 is secondary: a model could copy the
       context value there without propagating the regime.
     - Variant B: oracle p_upper_side collapses to ~1.0 (upper regime) or ~0.0
-      (lower). A model near ~0.5 at x = 2, 3 is IGNORING the post-fork point
-      -> location-OOD conditioning confirmed.
+      (lower). A model near ~0.5 at x = 2, 3 has failed to use the post-fork
+      observation to resolve and propagate the global regime.
     - Variant C: judge via the printed control readout (mean shift in units of
       the original oracle sigma, and the predictive-std ratio), NOT via branch
       probabilities.
 
 Usage (from repo root):
     python -u experiments/diagnose_post_fork_conditioning.py \
-        --config experiments/configs/evaluation/binary_latent_fork_histograms.yml \
+        --config experiments/configs/evaluation/binary_latent_fork_histograms_mixctx.yml \
         --device cuda
 """
 
@@ -65,35 +67,38 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output_dir",
-        default="results/synthetic_1d/binary_latent_fork_conditioning_diagnostic",
+        default=None,
         type=str,
+        help=(
+            "Optional output-directory override. If omitted, uses "
+            "conditioning_diagnostic.output_dir from the YAML."
+        ),
     )
     parser.add_argument("--device", default=None, type=str)
     parser.add_argument("--task_index", default=0, type=int)
-    parser.add_argument("--seed", default=20260713, type=int)
+    parser.add_argument("--seed", default=None, type=int)
 
     parser.add_argument(
         "--max_nc",
-        default=24,
+        default=None,
         type=int,
         help=(
-            "Cap the selected task's context size. Keeps Nc+1 comfortably "
-            "below the training max_nc, so the test isolates LOCATION-OOD "
-            "from context-SIZE-OOD."
+            "Cap the selected task's context size. Keeps Nc+1 within the "
+            "training context-size range."
         ),
     )
     parser.add_argument(
         "--training_max_nc",
-        default=32,
+        default=None,
         type=int,
         help="Training-time maximum context size (guard: Nc+1 must not exceed).",
     )
 
-    parser.add_argument("--inject_x", default=1.0, type=float)
-    parser.add_argument("--control_x", default=-1.0, type=float)
+    parser.add_argument("--inject_x", default=None, type=float)
+    parser.add_argument("--control_x", default=None, type=float)
     parser.add_argument(
         "--control_zscore",
-        default=2.0,
+        default=None,
         type=float,
         help=(
             "Set the in-range control observation this many original-oracle "
@@ -106,13 +111,13 @@ def parse_args() -> argparse.Namespace:
         "--x_locations",
         nargs="+",
         type=float,
-        default=[0.5, 2.0, 3.0],
+        default=None,
         help="Post-fork query locations. Decisive columns: 2.0 and 3.0.",
     )
 
-    parser.add_argument("--num_hist_samples", default=1024, type=int)
-    parser.add_argument("--num_oracle_samples", default=1024, type=int)
-    parser.add_argument("--bins", default=55, type=int)
+    parser.add_argument("--num_hist_samples", default=None, type=int)
+    parser.add_argument("--num_oracle_samples", default=None, type=int)
+    parser.add_argument("--bins", default=None, type=int)
     parser.add_argument(
         "--noiseless_injection",
         action="store_true",
@@ -178,15 +183,255 @@ def summary_rows(
     return rows
 
 
+def sparse_path_side_consistency_row(
+    *,
+    variant: str,
+    source: str,
+    samples: torch.Tensor,
+    x_values: List[float],
+    branch_centres: torch.Tensor,
+    postfork_min: float = 0.1,
+    exclude_x: float = 1.0,
+    exclude_tolerance: float = 1.0e-6,
+) -> Dict[str, Any]:
+    """Measure per-sample branch-side consistency at held-out post-fork points.
+
+    The injected coordinate is excluded so that Variant B tests whether branch
+    information propagates to other locations, rather than whether the model
+    reproduces a context observation at the same x.
+
+    This is a sparse-column diagnostic, not a complete full-path coherence
+    measure.
+    """
+    if samples.ndim != 4:
+        raise ValueError(
+            "Expected samples with shape [M, B, K, Dy], "
+            f"got {tuple(samples.shape)}."
+        )
+
+    if samples.shape[1] != 1 or samples.shape[-1] != 1:
+        raise ValueError(
+            "Expected diagnostic batch size 1 and output dimension 1, "
+            f"got {tuple(samples.shape)}."
+        )
+
+    if len(x_values) != samples.shape[2]:
+        raise ValueError(
+            "x_values length must match the sample location dimension. "
+            f"Got len(x_values)={len(x_values)} and "
+            f"samples.shape[2]={samples.shape[2]}."
+        )
+
+    if branch_centres.numel() != samples.shape[2]:
+        raise ValueError(
+            "branch_centres length must match the sample location dimension. "
+            f"Got {branch_centres.numel()} and {samples.shape[2]}."
+        )
+
+    # Use only held-out, fully post-transition locations.
+    # In the current diagnostic this should select x = 0.5, 2.0, 3.0 and
+    # deliberately exclude the injected coordinate x = 1.0.
+    cols = [
+        k
+        for k, x in enumerate(x_values)
+        if (
+            float(x) > float(postfork_min)
+            and abs(float(x) - float(exclude_x)) > float(exclude_tolerance)
+        )
+    ]
+
+    if len(cols) < 2:
+        raise ValueError(
+            "Need at least two held-out post-fork columns for a switch "
+            f"diagnostic. Selected x values: {[x_values[k] for k in cols]}."
+        )
+
+    vals = samples[:, 0, cols, 0].detach().float().cpu()  # [M, Kheld]
+    centres = (
+        branch_centres[cols]
+        .detach()
+        .float()
+        .cpu()
+        .reshape(1, -1)
+    )
+
+    # True means that this particular predictive sample lies above the
+    # original oracle mixture centre at this location.
+    above = vals > centres  # [M, Kheld]
+
+    # Number of upper/lower side changes along the ordered held-out columns.
+    switches = (
+        above[:, 1:] != above[:, :-1]
+    ).float().sum(dim=1)
+
+    zero_switch = switches == 0
+    all_upper = above.all(dim=1)
+    all_lower = (~above).all(dim=1)
+
+    frac_zero_switch = float(zero_switch.float().mean())
+    frac_all_upper = float(all_upper.float().mean())
+    frac_all_lower = float(all_lower.float().mean())
+
+    # Null comparison: expected probability of no switches if sample identity
+    # were independent across columns but each column retained its observed
+    # marginal upper-side probability.
+    p_upper_by_col = above.float().mean(dim=0)
+
+    independent_zero_switch_baseline = float(
+        torch.prod(p_upper_by_col)
+        + torch.prod(1.0 - p_upper_by_col)
+    )
+
+    return {
+        "variant": variant,
+        "source": source,
+        "num_heldout_postfork_cols": len(cols),
+        "heldout_x": ",".join(
+            f"{float(x_values[k]):.3f}"
+            for k in cols
+        ),
+        "frac_zero_switch": frac_zero_switch,
+        "mean_switches": float(switches.mean()),
+        "frac_all_upper_side": frac_all_upper,
+        "frac_all_lower_side": frac_all_lower,
+        "frac_mixed_side": float((~zero_switch).float().mean()),
+        "independent_zero_switch_baseline": (
+            independent_zero_switch_baseline
+        ),
+        "excess_zero_switch": (
+            frac_zero_switch - independent_zero_switch_baseline
+        ),
+    }
+
+
 @torch.no_grad()
 def main() -> None:
     args = parse_args()
 
+    cfg = OmegaConf.to_container(
+        OmegaConf.load(args.config),
+        resolve=True,
+    )
+
+    if not isinstance(cfg, dict):
+        raise TypeError(
+            f"Expected YAML config to resolve to a dictionary, got {type(cfg)}."
+        )
+
+    diagnostic_cfg = cfg.get("conditioning_diagnostic", {})
+
+    if not isinstance(diagnostic_cfg, dict):
+        raise TypeError(
+            "conditioning_diagnostic must be a YAML mapping, "
+            f"got {type(diagnostic_cfg)}."
+        )
+
+    def resolve_setting(
+        *,
+        cli_value,
+        key: str,
+        fallback,
+    ):
+        """Resolve setting with priority: CLI > diagnostic YAML > fallback."""
+        if cli_value is not None:
+            return cli_value
+
+        return diagnostic_cfg.get(key, fallback)
+
+    args.output_dir = resolve_setting(
+        cli_value=args.output_dir,
+        key="output_dir",
+        fallback=(
+            "results/synthetic_1d/"
+            "binary_latent_fork_conditioning_diagnostic"
+        ),
+    )
+
+    args.seed = int(
+        resolve_setting(
+            cli_value=args.seed,
+            key="seed",
+            fallback=20260713,
+        )
+    )
+
+    args.max_nc = int(
+        resolve_setting(
+            cli_value=args.max_nc,
+            key="max_nc",
+            fallback=24,
+        )
+    )
+
+    args.training_max_nc = int(
+        resolve_setting(
+            cli_value=args.training_max_nc,
+            key="training_max_nc",
+            fallback=32,
+        )
+    )
+
+    args.inject_x = float(
+        resolve_setting(
+            cli_value=args.inject_x,
+            key="inject_x",
+            fallback=1.0,
+        )
+    )
+
+    args.control_x = float(
+        resolve_setting(
+            cli_value=args.control_x,
+            key="control_x",
+            fallback=-1.0,
+        )
+    )
+
+    args.control_zscore = float(
+        resolve_setting(
+            cli_value=args.control_zscore,
+            key="control_zscore",
+            fallback=2.0,
+        )
+    )
+
+    args.x_locations = [
+        float(value)
+        for value in resolve_setting(
+            cli_value=args.x_locations,
+            key="x_locations",
+            fallback=[0.5, 2.0, 3.0],
+        )
+    ]
+
+    args.num_hist_samples = int(
+        resolve_setting(
+            cli_value=args.num_hist_samples,
+            key="num_hist_samples",
+            fallback=1024,
+        )
+    )
+
+    args.num_oracle_samples = int(
+        resolve_setting(
+            cli_value=args.num_oracle_samples,
+            key="num_oracle_samples",
+            fallback=1024,
+        )
+    )
+
+    args.bins = int(
+        resolve_setting(
+            cli_value=args.bins,
+            key="bins",
+            fallback=55,
+        )
+    )
+
+
     torch.manual_seed(int(args.seed))
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(int(args.seed))
-
-    cfg = OmegaConf.to_container(OmegaConf.load(args.config), resolve=True)
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -204,8 +449,19 @@ def main() -> None:
         )
     if float(args.control_x) > -0.25:
         raise ValueError(
-            "control_x must remain inside the training context support "
+            "control_x must remain inside the original pre-fork context support"
             f"[-4.0, -0.25]; got {args.control_x}."
+        )
+
+    if int(args.num_hist_samples) < 2:
+        raise ValueError(
+            "num_hist_samples must be at least 2 because the diagnostic "
+            "computes an unbiased sample standard deviation."
+        )
+
+    if int(args.num_oracle_samples) < 2:
+        raise ValueError(
+            "num_oracle_samples must be at least 2."
         )
 
     models = load_models(
@@ -359,6 +615,7 @@ def main() -> None:
     control_col = x_values.index(float(args.control_x))
 
     all_rows: List[Dict[str, Any]] = []
+    coherence_rows: List[Dict[str, Any]] = []
 
     for variant_name, variant_batch in variants:
         hist_batch = dataclasses.replace(
@@ -384,6 +641,17 @@ def main() -> None:
                     branch_centres=branch_centres,
                 )
             )
+            coherence_rows.append(
+                sparse_path_side_consistency_row(
+                    variant=variant_name,
+                    source=item["name"],
+                    samples=samples,
+                    x_values=x_values,
+                    branch_centres=branch_centres,
+                    postfork_min=0.1,
+                    exclude_x=float(args.inject_x),
+                )
+            )
             print(f"[{variant_name}] sampled {item['name']}")
 
         # Oracle reference (conditions on the SAME variant context).
@@ -400,6 +668,17 @@ def main() -> None:
                 samples=oracle_samples,
                 x_values=x_values,
                 branch_centres=branch_centres,
+            )
+        )
+        coherence_rows.append(
+            sparse_path_side_consistency_row(
+                variant=variant_name,
+                source="Oracle",
+                samples=oracle_samples,
+                x_values=x_values,
+                branch_centres=branch_centres,
+                postfork_min=0.1,
+                exclude_x=float(args.inject_x),
             )
         )
 
@@ -420,7 +699,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Numeric summary: CSV + console tables + decision rule.
     # ------------------------------------------------------------------
-    csv_path = output_dir / "conditioning_summary.csv"
+    csv_path = (output_dir / f"{spec['name']}_conditioning_summary.csv")
     with open(csv_path, "w", newline="") as f:
         writer = csv.DictWriter(
             f,
@@ -438,9 +717,70 @@ def main() -> None:
         writer.writeheader()
         writer.writerows(all_rows)
 
-    with open(output_dir / "diagnostic_config_resolved.json", "w") as f:
+    coherence_csv_path = (
+        output_dir / f"{spec['name']}_sparse_path_side_consistency.csv"
+    )
+    
+    coherence_fieldnames = [
+        "variant",
+        "source",
+        "num_heldout_postfork_cols",
+        "heldout_x",
+        "frac_zero_switch",
+        "mean_switches",
+        "frac_all_upper_side",
+        "frac_all_lower_side",
+        "frac_mixed_side",
+        "independent_zero_switch_baseline",
+        "excess_zero_switch",
+    ]
+    
+    with open(coherence_csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=coherence_fieldnames,
+        )
+        writer.writeheader()
+        writer.writerows(coherence_rows)
+    
+    print(
+        "\n=== Sparse held-out post-fork side consistency ==="
+    )
+    
+    print(
+        "variant".ljust(28)
+        + "source".ljust(28)
+        + "zero-sw".rjust(10)
+        + "indep-null".rjust(12)
+        + "excess".rjust(10)
+        + "mean-sw".rjust(10)
+        + "all-up".rjust(10)
+        + "all-low".rjust(10)
+    )
+    
+    for row in coherence_rows:
+        print(
+            str(row["variant"]).ljust(28)
+            + str(row["source"]).ljust(28)
+            + f"{row['frac_zero_switch']:10.3f}"
+            + f"{row['independent_zero_switch_baseline']:12.3f}"
+            + f"{row['excess_zero_switch']:10.3f}"
+            + f"{row['mean_switches']:10.3f}"
+            + f"{row['frac_all_upper_side']:10.3f}"
+            + f"{row['frac_all_lower_side']:10.3f}"
+        )
+    
+    print(f"\nWrote {coherence_csv_path}")
+
+    diagnostic_config_path = (
+        output_dir
+        / f"{spec['name']}_diagnostic_config_resolved.json"
+    )
+    
+    with open(diagnostic_config_path, "w") as f:
         json.dump(
             {
+                "config": cfg,
                 "cli": vars(args),
                 "regime": regime_label,
                 "nc": nc,
@@ -503,8 +843,8 @@ def main() -> None:
         "\nDecision rule:\n"
         "  B (decisive columns x=2.0, 3.0; x=0.5 for backward propagation):\n"
         "     Oracle p_upper_side collapses to ~1.0 (upper regime) or ~0.0\n"
-        "     (lower). A model stuck near ~0.5 there is IGNORING the post-fork\n"
-        "     context point (location-OOD conditioning confirmed). The\n"
+        "     (lower). A model remaining near ~0.5 there has not used the\n"
+        "     injected point to resolve and propagate the global regime. The\n"
         f"     injected column x={float(args.inject_x):+.2f} is secondary:\n"
         "     copying the context value locally is not regime propagation.\n"
         "  C: judge via mean shift (in original-oracle sigmas) and std ratio\n"
