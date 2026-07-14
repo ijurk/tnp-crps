@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import torch
 from omegaconf import OmegaConf
@@ -84,6 +84,49 @@ def parse_args() -> argparse.Namespace:
         ),
     )
 
+    parser.add_argument(
+        "--num_ar_anchors",
+        default=None,
+        type=int,
+        help=(
+            "Number of sparse inputs used for the sequential AR rollout. "
+            "If omitted, uses num_ar_anchors from the YAML. If neither is "
+            "specified, AR uses the dense plotting grid as before."
+        ),
+    )
+
+    parser.add_argument(
+        "--training_max_nc",
+        default=None,
+        type=int,
+        help=(
+            "Maximum context size seen during training. Sparse-anchor AR "
+            "enforces Nc + K <= training_max_nc."
+        ),
+    )
+
+    parser.add_argument(
+        "--ar_anchor_range",
+        nargs=2,
+        default=None,
+        type=float,
+        metavar=("X_MIN", "X_MAX"),
+        help=(
+            "Input range for sparse AR anchors. For binary fork use "
+            "'--ar_anchor_range 0.1 4.0'. If omitted, uses the YAML value."
+        ),
+    )
+
+    parser.add_argument(
+        "--denoise_chunk_size",
+        default=None,
+        type=int,
+        help=(
+            "Number of AR rollout paths denoised together. Smaller values "
+            "reduce GPU memory use."
+        ),
+    )
+
     parser.add_argument("--max_plots", default=None, type=int)
     parser.add_argument("--only_plot", default=None, type=str)
 
@@ -99,45 +142,120 @@ def parse_args() -> argparse.Namespace:
 
 
 @torch.no_grad()
+def denoise_ar_samples_in_chunks(
+    *,
+    model,
+    ar_batch: Batch,
+    raw_samples: torch.Tensor,
+    query_xt: torch.Tensor,
+    num_denoise_samples: int,
+    chunk_size: int,
+) -> torch.Tensor:
+    """Denoise AR rollout paths in memory-safe sample chunks."""
+    if raw_samples.ndim != 4:
+        raise ValueError(
+            "Expected raw_samples [M, B, K, Dy], "
+            f"got {tuple(raw_samples.shape)}."
+        )
+
+    chunk_size = int(chunk_size)
+
+    if chunk_size < 1:
+        raise ValueError(
+            f"chunk_size must be at least 1, got {chunk_size}."
+        )
+
+    chunks = []
+
+    for start in range(
+        0,
+        raw_samples.shape[0],
+        chunk_size,
+    ):
+        end = min(
+            start + chunk_size,
+            raw_samples.shape[0],
+        )
+
+        chunk = denoise_autoregressive_samples(
+            model=model,
+            batch=ar_batch,
+            ar_samples=raw_samples[start:end],
+            query_xt=query_xt,
+            num_denoise_samples=num_denoise_samples,
+        )
+
+        chunks.append(chunk)
+
+    return torch.cat(
+        chunks,
+        dim=0,
+    ).contiguous()
+    
+
+@torch.no_grad()
 def make_ar_prediction_row(
     *,
     item: Dict[str, Any],
-    plot_batch: Batch,
+    ar_batch: Batch,
+    query_xt: torch.Tensor,
     num_ar_samples: int,
     target_order: str,
     stochln_noise_mode: str,
     denoise_ar_samples: bool,
     num_denoise_samples: int,
+    denoise_chunk_size: int,
 ) -> Dict[str, Any]:
-    """Create one AR prediction row for plotting."""
+    """Create one raw or denoised AR prediction row."""
     raw_samples = autoregressive_sample_model(
         model=item["model"],
-        batch=plot_batch,
+        batch=ar_batch,
         num_samples=num_ar_samples,
         target_order=target_order,  # type: ignore[arg-type]
         stochln_noise_mode=stochln_noise_mode,  # type: ignore[arg-type]
     )
 
     if denoise_ar_samples:
-        samples = denoise_autoregressive_samples(
+        samples = denoise_ar_samples_in_chunks(
             model=item["model"],
-            batch=plot_batch,
-            ar_samples=raw_samples,
+            ar_batch=ar_batch,
+            raw_samples=raw_samples,
+            query_xt=query_xt,
             num_denoise_samples=num_denoise_samples,
+            chunk_size=denoise_chunk_size,
         )
+
         row_suffix = "AR denoised"
+        sample_path_label = "Denoised sample paths"
+        interval_label = "95% denoised path envelope"
+
     else:
+        # Raw samples can only be plotted directly when their support inputs
+        # are the same inputs as the plotting/query grid.
+        if (
+            ar_batch.xt.shape != query_xt.shape
+            or not torch.allclose(ar_batch.xt, query_xt)
+        ):
+            raise RuntimeError(
+                "Raw sparse-anchor AR samples are defined only at the anchor "
+                "locations and therefore cannot be plotted on the dense query "
+                "grid. Use --denoise_ar_samples for sparse-anchor plotting."
+            )
+
         samples = raw_samples
         row_suffix = "AR raw"
+        sample_path_label = "Predictive sample paths"
+        interval_label = "95% interval"
 
     return {
         "name": f"{item['name']} {row_suffix}",
         "samples": samples,
-        # For AR plots, show sample paths for all models, including Gaussian.
-        # AR samples are function-level rollouts, so these paths are informative.
-        "show_sample_paths": bool(item.get("show_ar_sample_paths", True)),
+        "show_sample_paths": bool(
+            item.get("show_ar_sample_paths", True)
+        ),
+        "sample_path_label": sample_path_label,
+        "interval_label": interval_label,
     }
-
 
 @torch.no_grad()
 def make_one_ar_plot(
@@ -156,34 +274,46 @@ def make_one_ar_plot(
     stochln_noise_mode: str,
     denoise_ar_samples: bool,
     num_denoise_samples: int,
+    denoise_chunk_size: int,
     include_one_shot: bool,
+    num_ar_anchors: Optional[int],
+    training_max_nc: Optional[int],
+    ar_anchor_range: Optional[List[float]],
 ) -> None:
-    batch = move_batch_to_device(batch, device)
+    batch = move_batch_to_device(
+        batch,
+        device,
+    )
 
     x_min = float(x_range[0])
     x_max = float(x_range[1])
-    num_points = max(2, int(points_per_unit * (x_max - x_min)))
+
+    num_dense_points = max(
+        2,
+        int(points_per_unit * (x_max - x_min)),
+    )
 
     x_plot = torch.linspace(
         x_min,
         x_max,
-        num_points,
+        num_dense_points,
         device=device,
         dtype=batch.xc.dtype,
     )[None, :, None]
 
-    # For latent/binary fork plots, this creates/stores exact dense realised truth
-    # via joint finite-dimensional sampling when enabled.
-    #
-    # For sawtooth plots, dense truth is handled by gt_pred.latent_function if
-    # available.
+    # Create an exact realised dense truth for generators that support it.
     batch = maybe_resample_batch_for_exact_dense_truth(
         batch=batch,
         x_plot=x_plot,
-        enabled=bool(plot_spec.get("resample_dense_ground_truth", True)),
+        enabled=bool(
+            plot_spec.get(
+                "resample_dense_ground_truth",
+                True,
+            )
+        ),
     )
 
-    y_placeholder = torch.zeros(
+    dense_y_placeholder = torch.zeros(
         x_plot.shape[0],
         x_plot.shape[1],
         batch.yc.shape[-1],
@@ -191,11 +321,114 @@ def make_one_ar_plot(
         dtype=batch.yc.dtype,
     )
 
-    plot_batch = dataclass_replace_batch(
+    dense_plot_batch = dataclass_replace_batch(
         batch,
         xt=x_plot,
-        yt=y_placeholder,
+        yt=dense_y_placeholder,
     )
+
+    use_sparse_anchors = num_ar_anchors is not None
+
+    if use_sparse_anchors:
+        if not denoise_ar_samples:
+            raise ValueError(
+                "Sparse-anchor plotting requires --denoise_ar_samples because "
+                "raw AR samples exist only at the sparse anchor locations."
+            )
+
+        if training_max_nc is None:
+            raise ValueError(
+                "Sparse-anchor AR requires training_max_nc so that "
+                "Nc + K remains within the training context-size range."
+            )
+
+        requested_anchors = int(num_ar_anchors)
+
+        if requested_anchors < 1:
+            raise ValueError(
+                "num_ar_anchors must be at least 1, "
+                f"got {requested_anchors}."
+            )
+
+        nc = int(batch.xc.shape[1])
+        max_allowed_anchors = int(training_max_nc) - nc
+
+        if max_allowed_anchors < 1:
+            raise RuntimeError(
+                "No in-distribution AR anchors are available: "
+                f"Nc={nc}, training_max_nc={training_max_nc}."
+            )
+
+        actual_num_anchors = min(
+            requested_anchors,
+            max_allowed_anchors,
+        )
+
+        if actual_num_anchors < requested_anchors:
+            print(
+                "Capping sparse AR anchors to remain within the training "
+                "context-size range: "
+                f"requested={requested_anchors}, "
+                f"allowed={actual_num_anchors}, "
+                f"Nc={nc}, "
+                f"training_max_nc={training_max_nc}."
+            )
+
+        anchor_bounds = plot_spec.get(
+            "ar_anchor_range",
+            ar_anchor_range,
+        )
+
+        if anchor_bounds is None:
+            anchor_bounds = x_range
+
+        if len(anchor_bounds) != 2:
+            raise ValueError(
+                "ar_anchor_range must contain [x_min, x_max], "
+                f"got {anchor_bounds}."
+            )
+
+        anchor_min = float(anchor_bounds[0])
+        anchor_max = float(anchor_bounds[1])
+
+        if not anchor_min < anchor_max:
+            raise ValueError(
+                "ar_anchor_range must satisfy x_min < x_max, "
+                f"got [{anchor_min}, {anchor_max}]."
+            )
+
+        x_anchor = torch.linspace(
+            anchor_min,
+            anchor_max,
+            actual_num_anchors,
+            device=device,
+            dtype=batch.xc.dtype,
+        )[None, :, None]
+
+        anchor_y_placeholder = torch.zeros(
+            x_anchor.shape[0],
+            x_anchor.shape[1],
+            batch.yc.shape[-1],
+            device=device,
+            dtype=batch.yc.dtype,
+        )
+
+        ar_batch = dataclass_replace_batch(
+            batch,
+            xt=x_anchor,
+            yt=anchor_y_placeholder,
+        )
+
+        support_label = (
+            f"K_AR={actual_num_anchors}"
+        )
+
+    else:
+        ar_batch = dense_plot_batch
+        actual_num_anchors = x_plot.shape[1]
+        support_label = (
+            f"N_AR={actual_num_anchors}"
+        )
 
     prediction_rows: List[Dict[str, Any]] = []
 
@@ -203,27 +436,38 @@ def make_one_ar_plot(
         if include_one_shot:
             one_shot_row = make_prediction_row(
                 item=item,
-                plot_batch=plot_batch,
+                plot_batch=dense_plot_batch,
                 num_plot_samples=num_plot_samples,
             )
-            one_shot_row["name"] = f"{one_shot_row['name']} one-shot"
-            prediction_rows.append(one_shot_row)
+
+            one_shot_row["name"] = (
+                f"{one_shot_row['name']} one-shot"
+            )
+
+            prediction_rows.append(
+                one_shot_row
+            )
 
         prediction_rows.append(
             make_ar_prediction_row(
                 item=item,
-                plot_batch=plot_batch,
+                ar_batch=ar_batch,
+                query_xt=x_plot,
                 num_ar_samples=num_ar_samples,
                 target_order=target_order,
                 stochln_noise_mode=stochln_noise_mode,
                 denoise_ar_samples=denoise_ar_samples,
                 num_denoise_samples=num_denoise_samples,
+                denoise_chunk_size=denoise_chunk_size,
             )
         )
 
     dataset_label = plot_spec.get(
         "kernel",
-        plot_spec.get("dataset", "native_generator"),
+        plot_spec.get(
+            "dataset",
+            "native_generator",
+        ),
     )
 
     ar_label = (
@@ -239,16 +483,29 @@ def make_one_ar_plot(
     )
 
     title = (
-        f"{plot_spec['name']} | dataset={dataset_label} | "
+        f"{plot_spec['name']} | "
+        f"dataset={dataset_label} | "
         f"sampling={sampling_label} | "
-        f"Nc={batch.xc.shape[1]} | M_AR={num_ar_samples}"
+        f"Nc={batch.xc.shape[1]} | "
+        f"{support_label} | "
+        f"M_AR={num_ar_samples}"
     )
 
-    y_lim = plot_spec.get("y_lim", None)
-    if y_lim is not None:
-        y_lim = (float(y_lim[0]), float(y_lim[1]))
+    y_lim = plot_spec.get(
+        "y_lim",
+        None,
+    )
 
-    output_path_base = output_dir / plot_spec["name"]
+    if y_lim is not None:
+        y_lim = (
+            float(y_lim[0]),
+            float(y_lim[1]),
+        )
+
+    output_path_base = (
+        output_dir
+        / plot_spec["name"]
+    )
 
     plot_function_comparison(
         batch=batch,
@@ -258,11 +515,34 @@ def make_one_ar_plot(
         title=title,
         num_sample_paths=num_sample_paths,
         y_lim=y_lim,
-        show_targets=bool(plot_spec.get("show_targets", True)),
-        show_ground_truth=bool(plot_spec.get("show_ground_truth", True)),
-        show_realised_task=bool(plot_spec.get("show_realised_task", True)),
-        show_oracle_posterior=bool(plot_spec.get("show_oracle_posterior", True)),
-        training_ranges=plot_spec.get("training_ranges", None),
+        show_targets=bool(
+            plot_spec.get(
+                "show_targets",
+                True,
+            )
+        ),
+        show_ground_truth=bool(
+            plot_spec.get(
+                "show_ground_truth",
+                True,
+            )
+        ),
+        show_realised_task=bool(
+            plot_spec.get(
+                "show_realised_task",
+                True,
+            )
+        ),
+        show_oracle_posterior=bool(
+            plot_spec.get(
+                "show_oracle_posterior",
+                True,
+            )
+        ),
+        training_ranges=plot_spec.get(
+            "training_ranges",
+            None,
+        ),
     )
 
 
@@ -313,6 +593,42 @@ def main() -> None:
         else cfg["num_sample_paths"]
     )
 
+
+    num_ar_anchors = None
+
+    if args.num_ar_anchors is not None:
+        num_ar_anchors = int(args.num_ar_anchors)
+    elif cfg.get("num_ar_anchors", None) is not None:
+        num_ar_anchors = int(cfg["num_ar_anchors"])
+    
+    
+    training_max_nc = None
+    
+    if args.training_max_nc is not None:
+        training_max_nc = int(args.training_max_nc)
+    elif cfg.get("training_max_nc", None) is not None:
+        training_max_nc = int(cfg["training_max_nc"])
+    
+    
+    ar_anchor_range = (
+        list(args.ar_anchor_range)
+        if args.ar_anchor_range is not None
+        else cfg.get("ar_anchor_range", None)
+    )
+    
+    if ar_anchor_range is not None:
+        ar_anchor_range = [
+            float(value)
+            for value in ar_anchor_range
+        ]
+    
+    
+    denoise_chunk_size = int(
+        args.denoise_chunk_size
+        if args.denoise_chunk_size is not None
+        else cfg.get("denoise_chunk_size", 16)
+    )
+
     with open(output_dir / "ar_plot_config_resolved.json", "w") as f:
         json.dump(
             {
@@ -328,11 +644,19 @@ def main() -> None:
                     "max_plots": args.max_plots,
                     "only_plot": args.only_plot,
                     "include_one_shot": args.include_one_shot,
+                    "num_ar_anchors": args.num_ar_anchors,
+                    "training_max_nc": args.training_max_nc,
+                    "ar_anchor_range": args.ar_anchor_range,
+                    "denoise_chunk_size": args.denoise_chunk_size,
                 },
                 "resolved_ar_defaults": {
                     "num_ar_samples": num_ar_samples,
                     "points_per_unit": points_per_unit,
                     "num_sample_paths": num_sample_paths,
+                    "num_ar_anchors": num_ar_anchors,
+                    "training_max_nc": training_max_nc,
+                    "ar_anchor_range": ar_anchor_range,
+                    "denoise_chunk_size": denoise_chunk_size,
                 },
             },
             f,
@@ -385,6 +709,10 @@ def main() -> None:
             denoise_ar_samples=bool(args.denoise_ar_samples),
             num_denoise_samples=int(args.num_denoise_samples),
             include_one_shot=bool(args.include_one_shot),
+            denoise_chunk_size=denoise_chunk_size,
+            num_ar_anchors=num_ar_anchors,
+            training_max_nc=training_max_nc,
+            ar_anchor_range=ar_anchor_range,
         )
 
 

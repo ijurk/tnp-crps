@@ -362,85 +362,166 @@ def denoise_autoregressive_samples(
     model,
     batch: Batch,
     ar_samples: torch.Tensor,
+    query_xt: Optional[torch.Tensor] = None,
     num_denoise_samples: int = 32,
 ) -> torch.Tensor:
-    """Denoise AR samples by conditioning on them and returning predictive means.
+    """Turn noisy AR support samples into smooth conditional-mean paths.
 
-    This follows the AR-CNP smooth-sample idea:
+    The AR support inputs are stored in batch.xt and their sampled values are
+    supplied in ar_samples. The final denoising query may be a different,
+    usually denser, set of inputs supplied through query_xt.
 
-        1. Generate noisy AR sampled points.
-        2. Append those sampled points to the original context.
-        3. Query the model again and use the predictive mean as the smooth sample.
+    Procedure for each AR rollout path:
+        1. Append the sampled AR support points to the original context.
+        2. Query the resulting augmented context at query_xt.
+        3. Return the predictive mean at query_xt.
 
     Args:
-        model: trained Gaussian TNP or DirectTNP/CRPS model.
-        batch: Batch used for AR sampling.
-        ar_samples: raw AR samples [M, B, Nt, Dy], aligned with batch.xt.
-        num_denoise_samples: number of stochastic samples used to approximate
-            the predictive mean for DirectTNP/CRPS models.
+        model:
+            Trained Gaussian TNP or DirectTNP/CRPS model.
+
+        batch:
+            Batch used for AR sampling. batch.xt contains the sparse support
+            inputs with shape [B, K, Dx].
+
+        ar_samples:
+            Noisy AR support samples with shape [M, B, K, Dy].
+
+        query_xt:
+            Inputs on which to produce the final smooth path, with shape
+            [B, Nq, Dx]. If omitted, query_xt defaults to batch.xt, recovering
+            the previous same-support behaviour.
+
+        num_denoise_samples:
+            Number of stochastic model samples used to approximate the
+            conditional predictive mean for DirectTNP models.
 
     Returns:
-        denoised_samples: [M, B, Nt, Dy]
+        denoised_samples:
+            Conditional-mean paths with shape [M, B, Nq, Dy].
     """
     if ar_samples.ndim != 4:
         raise ValueError(
-            "Expected ar_samples [M, B, Nt, Dy], "
+            "Expected ar_samples [M, B, K, Dy], "
             f"got {tuple(ar_samples.shape)}."
         )
 
-    num_samples, batch_size, num_targets, dy = ar_samples.shape
+    num_samples, batch_size, num_support, dy = ar_samples.shape
+
+    if batch.xt.ndim != 3:
+        raise ValueError(
+            f"Expected batch.xt [B, K, Dx], got {tuple(batch.xt.shape)}."
+        )
 
     if batch.xt.shape[0] != batch_size:
         raise ValueError(
-            f"Batch size mismatch: ar_samples B={batch_size}, "
+            f"Batch-size mismatch: ar_samples B={batch_size}, "
             f"batch.xt B={batch.xt.shape[0]}."
         )
 
-    if batch.xt.shape[1] != num_targets:
+    if batch.xt.shape[1] != num_support:
         raise ValueError(
-            f"Target size mismatch: ar_samples Nt={num_targets}, "
-            f"batch.xt Nt={batch.xt.shape[1]}."
+            f"Support-size mismatch: ar_samples K={num_support}, "
+            f"batch.xt K={batch.xt.shape[1]}."
         )
 
     if batch.yc.shape[-1] != dy:
         raise ValueError(
-            f"Output dimension mismatch: ar_samples Dy={dy}, "
+            f"Output-dimension mismatch: ar_samples Dy={dy}, "
             f"batch.yc Dy={batch.yc.shape[-1]}."
         )
 
+    if query_xt is None:
+        query_xt = batch.xt
+
+    if query_xt.ndim != 3:
+        raise ValueError(
+            f"Expected query_xt [B, Nq, Dx], got {tuple(query_xt.shape)}."
+        )
+
+    if query_xt.shape[0] != batch_size:
+        raise ValueError(
+            f"query_xt batch size must be {batch_size}, "
+            f"got {query_xt.shape[0]}."
+        )
+
+    if query_xt.shape[-1] != batch.xt.shape[-1]:
+        raise ValueError(
+            "query_xt and batch.xt must have the same input dimension. "
+            f"Got query Dx={query_xt.shape[-1]} and "
+            f"support Dx={batch.xt.shape[-1]}."
+        )
+
+    query_xt = query_xt.to(
+        device=batch.xt.device,
+        dtype=batch.xt.dtype,
+    )
+
+    num_queries = query_xt.shape[1]
+
     model.eval()
 
-    x_support = (
-        batch.xt.unsqueeze(0)
-        .expand(num_samples, batch_size, *batch.xt.shape[1:])
-        .reshape(num_samples * batch_size, num_targets, batch.xt.shape[-1])
-        .contiguous()
+    # Repeat in sample-major order:
+    #     rollout 0, all tasks
+    #     rollout 1, all tasks
+    #     ...
+    x_support = _repeat_for_samples(
+        batch.xt,
+        num_samples,
     )
 
     y_support = ar_samples.reshape(
         num_samples * batch_size,
-        num_targets,
+        num_support,
         dy,
     ).contiguous()
 
-    xc_rep = _repeat_for_samples(batch.xc, num_samples)
-    yc_rep = _repeat_for_samples(batch.yc, num_samples)
+    xc_rep = _repeat_for_samples(
+        batch.xc,
+        num_samples,
+    )
 
-    xc_denoise = torch.cat([xc_rep, x_support], dim=1)
-    yc_denoise = torch.cat([yc_rep, y_support], dim=1)
+    yc_rep = _repeat_for_samples(
+        batch.yc,
+        num_samples,
+    )
 
-    y_placeholder = torch.zeros_like(y_support)
+    x_query = _repeat_for_samples(
+        query_xt,
+        num_samples,
+    )
+
+    xc_denoise = torch.cat(
+        [xc_rep, x_support],
+        dim=1,
+    )
+
+    yc_denoise = torch.cat(
+        [yc_rep, y_support],
+        dim=1,
+    )
+
+    y_placeholder = torch.zeros(
+        num_samples * batch_size,
+        num_queries,
+        dy,
+        device=batch.yc.device,
+        dtype=batch.yc.dtype,
+    )
 
     denoise_batch = dataclasses.replace(
         batch,
         xc=xc_denoise,
         yc=yc_denoise,
-        xt=x_support,
+        xt=x_query,
         yt=y_placeholder,
     )
 
     if isinstance(model, DirectTNP):
-        num_denoise_samples = max(2, int(num_denoise_samples))
+        num_denoise_samples = max(
+            2,
+            int(num_denoise_samples),
+        )
 
         y_all = model.sample(
             xc=denoise_batch.xc,
@@ -451,7 +532,8 @@ def denoise_autoregressive_samples(
 
         if y_all.ndim != 4:
             raise ValueError(
-                "Expected DirectTNP denoise samples [S, M*B, Nt, Dy], "
+                "Expected DirectTNP denoising samples "
+                "[S, M*B, Nq, Dy], "
                 f"got {tuple(y_all.shape)}."
             )
 
@@ -463,18 +545,24 @@ def denoise_autoregressive_samples(
             batch=denoise_batch,
             num_samples=1,
         )
+
         mean_flat = pred_dist.mean
 
-    expected_shape = (num_samples * batch_size, num_targets, dy)
+    expected_shape = (
+        num_samples * batch_size,
+        num_queries,
+        dy,
+    )
+
     if tuple(mean_flat.shape) != expected_shape:
         raise ValueError(
-            f"Denoised mean has wrong shape. Expected {expected_shape}, "
-            f"got {tuple(mean_flat.shape)}."
+            "Denoised mean has the wrong shape. "
+            f"Expected {expected_shape}, got {tuple(mean_flat.shape)}."
         )
 
     return mean_flat.reshape(
         num_samples,
         batch_size,
-        num_targets,
+        num_queries,
         dy,
     ).contiguous()

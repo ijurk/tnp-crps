@@ -353,6 +353,20 @@ def plot_function_comparison(
 
         show_sample_paths = bool(row.get("show_sample_paths", True))
 
+        sample_path_label = str(
+            row.get(
+                "sample_path_label",
+                "Predictive sample paths",
+            )
+        )
+        
+        interval_label = str(
+            row.get(
+                "interval_label",
+                "95% interval",
+            )
+        )
+
         # Shade the training / interpolation window(s).
         # White regions are extrapolation.
         if training_ranges is not None:
@@ -394,7 +408,7 @@ def plot_function_comparison(
                     color="0.45",
                     alpha=0.30,
                     linewidth=0.80,
-                    label="Predictive sample paths" if sample_idx == 0 else None,
+                    label=sample_path_label if sample_idx == 0 else None,
                     zorder=1,
                 )
 
@@ -403,7 +417,7 @@ def plot_function_comparison(
             q025,
             q975,
             alpha=0.20,
-            label="95% interval",
+            label=interval_label,
             zorder=0,
         )
 
