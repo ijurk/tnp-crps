@@ -1,0 +1,41 @@
+output_dir: results/synthetic_1d/sawtooth_interpolation_gate
+device: cuda
+base_generator_config: experiments/configs/generators/sawtooth_1d_interpolation.yml
+num_eval_samples: 64
+num_tasks_per_nc: 4096
+eval_batch_size: 16
+fixed_nc_values:
+- 1
+- 2
+- 4
+- 8
+- 16
+- 30
+seed: 20260715
+models:
+- name: Gaussian TNP raw x
+  model_config: external/tnp/experiments/configs/models/tnp_lr_scheduler.yml
+  checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-gaussian-raw/sawtooth-raw-v1/last.ckpt
+  overrides: []
+- name: Gaussian TNP Fourier
+  model_config: experiments/configs/models/tnp_fourier.yml
+  checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-gaussian-fourier/sawtooth-fourier-v1/last.ckpt
+  overrides: []
+- name: Dropout CRPS M4 p0.10 Fourier
+  model_config: experiments/configs/models/tnp_crps_dropout_fourier.yml
+  checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-m4-p010/sawtooth-fourier-v1/last.ckpt
+  overrides:
+  - params.num_samples=4
+  - params.val_num_samples=10
+  - params.test_num_samples=64
+  - params.p_dropout=0.10
+  - params.crps_alpha=1.0
+- name: StochLN CRPS M4 Fourier
+  model_config: experiments/configs/models/tnp_crps_stochln_fourier.yml
+  checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-stochln-fourier-m4/sawtooth-fourier-v1/last.ckpt
+  overrides:
+  - params.num_samples=4
+  - params.val_num_samples=10
+  - params.test_num_samples=64
+  - params.crps_alpha=1.0
+  - params.layernorm_noise_dim=32
