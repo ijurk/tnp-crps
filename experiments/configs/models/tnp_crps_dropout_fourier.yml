@@ -81,6 +81,9 @@ misc:
   gradient_clip_val: 0.5
   plot_interval: 10
   pin_memory: false
+  # Weights-only curriculum initialisation. This is distinct from a full
+  # Lightning resume through resume_from_checkpoint.
+  init_weights_from: null
 x_encoder:
   _target_: tnp.networks.embeddings.FourierEmbedding
   lower: ${params.fourier_min_wavelength}

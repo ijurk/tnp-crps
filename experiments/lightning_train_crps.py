@@ -104,6 +104,75 @@ def main():
         test_num_samples=getattr(experiment.params, "test_num_samples", model.num_samples),
         )
 
+    # --------------------------------------------------------------
+    # Weights-only warm start.
+    #
+    # Unlike trainer.fit(..., ckpt_path=...), this loads model weights
+    # without restoring the optimiser, scheduler, epoch counter, or
+    # global step. It is intended for deterministic-pretraining to
+    # probabilistic-fine-tuning curricula.
+    # --------------------------------------------------------------
+    init_ref = getattr(
+        experiment.misc,
+        "init_weights_from",
+        None,
+    )
+
+    if init_ref is not None:
+        if ckpt_file is not None:
+            raise ValueError(
+                "Use either misc.init_weights_from for a weights-only "
+                "warm start or misc.resume_from_checkpoint for a full "
+                "Lightning resume, not both."
+            )
+
+        init_file = os.path.abspath(
+            os.path.expanduser(
+                str(init_ref)
+            )
+        )
+
+        if not os.path.isfile(init_file):
+            raise FileNotFoundError(
+                "Weights-only initialisation checkpoint does not exist: "
+                f"{init_file}"
+            )
+
+        # weights_only=False is appropriate here because these are trusted
+        # local Lightning checkpoints created by this repository.
+        try:
+            checkpoint = torch.load(
+                init_file,
+                map_location="cpu",
+                weights_only=False,
+            )
+        except TypeError:
+            # Compatibility with older PyTorch versions which do not expose
+            # the weights_only argument.
+            checkpoint = torch.load(
+                init_file,
+                map_location="cpu",
+            )
+
+        if "state_dict" not in checkpoint:
+            raise KeyError(
+                "Expected a Lightning checkpoint containing 'state_dict'. "
+                f"Available keys: {list(checkpoint.keys())}"
+            )
+
+        state_dict = checkpoint["state_dict"]
+
+        lit_model.load_state_dict(
+            state_dict,
+            strict=True,
+        )
+
+        print(
+            "Initialised model weights from "
+            f"{init_file} "
+            "(fresh optimiser, scheduler, epoch counter, and global step)."
+        )
+
     checkpoint_parts = [
         project_root,
         "checkpoints",
