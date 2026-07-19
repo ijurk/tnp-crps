@@ -118,6 +118,28 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "--anchor_placement",
+        default=None,
+        choices=["linspace", "uniform_random"],
+        type=str,
+        help=(
+            "How to place sparse AR support inputs. "
+            "Use 'linspace' for the binary fork and 'uniform_random' "
+            "for periodic sawtooth tasks."
+        ),
+    )
+
+    parser.add_argument(
+        "--anchor_seed",
+        default=None,
+        type=int,
+        help=(
+            "Random seed for uniform_random anchor placement. "
+            "If omitted, uses anchor_seed from the YAML."
+        ),
+    )
+
+    parser.add_argument(
         "--denoise_chunk_size",
         default=None,
         type=int,
@@ -279,6 +301,8 @@ def make_one_ar_plot(
     num_ar_anchors: Optional[int],
     training_max_nc: Optional[int],
     ar_anchor_range: Optional[List[float]],
+    anchor_placement: str,
+    anchor_seed: Optional[int],
 ) -> None:
     batch = move_batch_to_device(
         batch,
@@ -397,13 +421,86 @@ def make_one_ar_plot(
                 f"got [{anchor_min}, {anchor_max}]."
             )
 
-        x_anchor = torch.linspace(
-            anchor_min,
-            anchor_max,
-            actual_num_anchors,
-            device=device,
-            dtype=batch.xc.dtype,
-        )[None, :, None]
+        resolved_anchor_placement = str(
+            plot_spec.get(
+                "anchor_placement",
+                anchor_placement,
+            )
+        )
+
+        if resolved_anchor_placement not in (
+            "linspace",
+            "uniform_random",
+        ):
+            raise ValueError(
+                "anchor_placement must be 'linspace' or "
+                f"'uniform_random', got {resolved_anchor_placement!r}."
+            )
+
+        resolved_anchor_seed_value = plot_spec.get(
+            "anchor_seed",
+            anchor_seed,
+        )
+
+        resolved_anchor_seed = (
+            None
+            if resolved_anchor_seed_value is None
+            else int(resolved_anchor_seed_value)
+        )
+
+        batch_size = int(batch.xc.shape[0])
+
+        if resolved_anchor_placement == "linspace":
+            x_anchor = (
+                torch.linspace(
+                    anchor_min,
+                    anchor_max,
+                    actual_num_anchors,
+                    device=device,
+                    dtype=batch.xc.dtype,
+                )
+                .view(1, actual_num_anchors, 1)
+                .expand(batch_size, -1, -1)
+                .contiguous()
+            )
+
+        else:
+            if resolved_anchor_seed is None:
+                raise ValueError(
+                    "uniform_random anchor placement requires "
+                    "anchor_seed in the YAML or --anchor_seed."
+                )
+
+            anchor_generator = torch.Generator(
+                device="cpu",
+            )
+
+            anchor_generator.manual_seed(
+                resolved_anchor_seed,
+            )
+
+            unit_anchor = torch.rand(
+                batch_size,
+                actual_num_anchors,
+                1,
+                generator=anchor_generator,
+                dtype=torch.float32,
+            )
+
+            x_anchor = (
+                anchor_min
+                + (anchor_max - anchor_min) * unit_anchor
+            ).to(
+                device=device,
+                dtype=batch.xc.dtype,
+            )
+
+            # Store anchors in increasing x order. When target_order="random",
+            # each rollout still receives its own random AR permutation.
+            x_anchor = torch.sort(
+                x_anchor,
+                dim=1,
+            ).values.contiguous()
 
         anchor_y_placeholder = torch.zeros(
             x_anchor.shape[0],
@@ -420,7 +517,8 @@ def make_one_ar_plot(
         )
 
         support_label = (
-            f"K_AR={actual_num_anchors}"
+            f"K_AR={actual_num_anchors}, "
+            f"anchors={resolved_anchor_placement}"
         )
 
     else:
@@ -623,6 +721,32 @@ def main() -> None:
         ]
     
     
+    anchor_placement = str(
+        args.anchor_placement
+        if args.anchor_placement is not None
+        else cfg.get("anchor_placement", "linspace")
+    )
+
+    if anchor_placement not in (
+        "linspace",
+        "uniform_random",
+    ):
+        raise ValueError(
+            "anchor_placement must be 'linspace' or "
+            f"'uniform_random', got {anchor_placement!r}."
+        )
+
+    anchor_seed = (
+        int(args.anchor_seed)
+        if args.anchor_seed is not None
+        else (
+            int(cfg["anchor_seed"])
+            if cfg.get("anchor_seed", None) is not None
+            else None
+        )
+    )
+
+
     denoise_chunk_size = int(
         args.denoise_chunk_size
         if args.denoise_chunk_size is not None
@@ -647,6 +771,8 @@ def main() -> None:
                     "num_ar_anchors": args.num_ar_anchors,
                     "training_max_nc": args.training_max_nc,
                     "ar_anchor_range": args.ar_anchor_range,
+                    "anchor_placement": args.anchor_placement,
+                    "anchor_seed": args.anchor_seed,
                     "denoise_chunk_size": args.denoise_chunk_size,
                 },
                 "resolved_ar_defaults": {
@@ -656,6 +782,8 @@ def main() -> None:
                     "num_ar_anchors": num_ar_anchors,
                     "training_max_nc": training_max_nc,
                     "ar_anchor_range": ar_anchor_range,
+                    "anchor_placement": anchor_placement,
+                    "anchor_seed": anchor_seed,
                     "denoise_chunk_size": denoise_chunk_size,
                 },
             },
@@ -713,6 +841,8 @@ def main() -> None:
             num_ar_anchors=num_ar_anchors,
             training_max_nc=training_max_nc,
             ar_anchor_range=ar_anchor_range,
+            anchor_placement=anchor_placement,
+            anchor_seed=anchor_seed,
         )
 
 
