@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import dataclasses
+import time
 import math
 from pathlib import Path
 from typing import Any, Dict, List
@@ -13,6 +15,7 @@ from omegaconf import OmegaConf
 
 from evaluate_synthetic_1d import move_batch_to_device, sample_model
 from plot_synthetic_1d_functions import load_models
+from evaluation.autoregressive import autoregressive_sample_model
 
 
 def parse_args() -> argparse.Namespace:
@@ -30,6 +33,53 @@ def parse_args() -> argparse.Namespace:
         default=None,
         type=int,
         help="Optional override for fixed context counts from the YAML.",
+    )
+
+    parser.add_argument(
+        "--evaluation_mode",
+        default=None,
+        choices=[
+            "one_shot",
+            "ar_anchors",
+        ],
+        type=str,
+        help=(
+            "Evaluation procedure. The dissertation AR configs "
+            "use 'ar_anchors'."
+        ),
+    )
+
+    parser.add_argument(
+        "--num_tasks",
+        default=None,
+        type=int,
+        help=(
+            "Number of independent test tasks for AR evaluation."
+        ),
+    )
+
+    parser.add_argument(
+        "--num_ar_samples",
+        default=None,
+        type=int,
+        help=(
+            "Number of independent AR rollout paths per task."
+        ),
+    )
+
+    parser.add_argument(
+        "--eval_batch_size",
+        default=None,
+        type=int,
+    )
+
+    parser.add_argument(
+        "--eval_nc",
+        default=None,
+        type=int,
+        help=(
+            "Initial context size before adding AR anchors."
+        ),
     )
 
     return parser.parse_args()
@@ -271,43 +321,53 @@ def summarise(
                 / math.sqrt(num_tasks)
             )
 
-        rows.append(
-            {
-                "nc": int(nc),
-                "source": source,
-                "num_tasks": num_tasks,
-                "rmse": math.sqrt(
-                    float(group["mse"].mean())
-                ),
-                "rmse_task_se": standard_error(
-                    "rmse_task"
-                ),
-                "crps": float(group["crps"].mean()),
-                "crps_se": standard_error("crps"),
-                "energy": float(group["energy"].mean()),
-                "energy_se": standard_error("energy"),
-                "coverage90": float(
-                    group["coverage90"].mean()
-                ),
-                "coverage90_se": standard_error(
-                    "coverage90"
-                ),
-                "coverage95": float(
-                    group["coverage95"].mean()
-                ),
-                "coverage95_se": standard_error(
-                    "coverage95"
-                ),
-                "width90": float(
-                    group["width90"].mean()
-                ),
-                "width90_se": standard_error("width90"),
-                "width95": float(
-                    group["width95"].mean()
-                ),
-                "width95_se": standard_error("width95"),
-            }
-        )
+        row: Dict[str, Any] = {
+            "nc": int(nc),
+            "source": source,
+            "num_tasks": num_tasks,
+            "rmse": math.sqrt(
+                float(group["mse"].mean())
+            ),
+            "rmse_task_se": standard_error(
+                "rmse_task"
+            ),
+            "crps": float(group["crps"].mean()),
+            "crps_se": standard_error("crps"),
+            "energy": float(group["energy"].mean()),
+            "energy_se": standard_error("energy"),
+            "coverage90": float(
+                group["coverage90"].mean()
+            ),
+            "coverage90_se": standard_error(
+                "coverage90"
+            ),
+            "coverage95": float(
+                group["coverage95"].mean()
+            ),
+            "coverage95_se": standard_error(
+                "coverage95"
+            ),
+            "width90": float(
+                group["width90"].mean()
+            ),
+            "width90_se": standard_error("width90"),
+            "width95": float(
+                group["width95"].mean()
+            ),
+            "width95_se": standard_error("width95"),
+        }
+
+        if "runtime_s_per_task" in group.columns:
+            row["runtime_s_per_task"] = float(
+                group["runtime_s_per_task"].mean()
+            )
+            row["runtime_s_per_task_se"] = (
+                standard_error(
+                    "runtime_s_per_task"
+                )
+            )
+
+        rows.append(row)
 
     summary = pd.DataFrame(rows)
 
@@ -315,7 +375,12 @@ def summarise(
         summary[
             summary["source"] == "Trivial U(0,1)"
         ][
-            ["nc", "rmse", "crps", "energy"]
+            [
+                "nc",
+                "rmse",
+                "crps",
+                "energy",
+            ]
         ]
         .rename(
             columns={
@@ -332,20 +397,493 @@ def summarise(
         how="left",
     )
 
-    # Lower is better for all three metrics.
     summary["delta_rmse_vs_trivial"] = (
-        summary["rmse"] - summary["trivial_rmse"]
+        summary["rmse"]
+        - summary["trivial_rmse"]
     )
 
     summary["delta_crps_vs_trivial"] = (
-        summary["crps"] - summary["trivial_crps"]
+        summary["crps"]
+        - summary["trivial_crps"]
     )
 
     summary["delta_energy_vs_trivial"] = (
-        summary["energy"] - summary["trivial_energy"]
+        summary["energy"]
+        - summary["trivial_energy"]
     )
 
     return summary
+
+
+@torch.inference_mode()
+def run_ar_anchor_evaluation(
+    *,
+    args: argparse.Namespace,
+    cfg: Dict[str, Any],
+) -> None:
+    output_dir = Path(
+        args.output_dir
+        or cfg["output_dir"]
+    )
+
+    refuse_overwrite = bool(
+        cfg.get("refuse_overwrite", False)
+    )
+
+    if (
+        refuse_overwrite
+        and output_dir.exists()
+        and any(output_dir.iterdir())
+    ):
+        raise FileExistsError(
+            "Output directory already contains files: "
+            f"{output_dir}."
+        )
+
+    output_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    device_name = (
+        args.device
+        or cfg.get("device", "cuda")
+    )
+
+    if (
+        device_name == "cuda"
+        and not torch.cuda.is_available()
+    ):
+        raise RuntimeError(
+            "CUDA was requested but is unavailable."
+        )
+
+    device = torch.device(device_name)
+
+    num_tasks = int(
+        args.num_tasks
+        if args.num_tasks is not None
+        else cfg["num_tasks"]
+    )
+
+    num_ar_samples = int(
+        args.num_ar_samples
+        if args.num_ar_samples is not None
+        else cfg["num_ar_samples"]
+    )
+
+    eval_batch_size = int(
+        args.eval_batch_size
+        if args.eval_batch_size is not None
+        else cfg["eval_batch_size"]
+    )
+
+    eval_nc = int(
+        args.eval_nc
+        if args.eval_nc is not None
+        else cfg["eval_nc"]
+    )
+
+    num_anchors = int(
+        cfg["num_ar_anchors"]
+    )
+
+    training_max_nc = int(
+        cfg["training_max_nc"]
+    )
+
+    if eval_nc + num_anchors > training_max_nc:
+        raise ValueError(
+            "Completed AR context exceeds the training maximum: "
+            f"{eval_nc} + {num_anchors} > "
+            f"{training_max_nc}."
+        )
+
+    if num_tasks % eval_batch_size != 0:
+        raise ValueError(
+            "num_tasks must be divisible by eval_batch_size. "
+            f"Got {num_tasks} and {eval_batch_size}."
+        )
+
+    if num_ar_samples < 2:
+        raise ValueError(
+            "num_ar_samples must be at least two."
+        )
+
+    seed = int(
+        cfg.get("seed", 20260720)
+    )
+
+    anchor_seed = int(
+        cfg.get(
+            "anchor_seed",
+            seed + 1,
+        )
+    )
+
+    anchor_min = float(
+        cfg["ar_anchor_range"][0]
+    )
+    anchor_max = float(
+        cfg["ar_anchor_range"][1]
+    )
+
+    if not anchor_min < anchor_max:
+        raise ValueError(
+            "ar_anchor_range must satisfy min < max."
+        )
+
+    target_order = str(
+        cfg.get(
+            "target_order",
+            "random",
+        )
+    )
+
+    stochln_noise_mode = str(
+        cfg.get(
+            "stochln_noise_mode",
+            "refresh",
+        )
+    )
+
+    base_generator_config = str(
+        cfg["base_generator_config"]
+    )
+
+    models = load_models(
+        model_entries=cfg["models"],
+        base_generator_config=base_generator_config,
+        device=device,
+    )
+
+    for item in models:
+        item["model"].eval()
+
+    generator_cfg = OmegaConf.load(
+        base_generator_config
+    )
+
+    # Preserve the complete config tree so ${params.*}
+    # interpolations remain valid.
+    fixed_generator_cfg = OmegaConf.create(
+        OmegaConf.to_container(
+            generator_cfg,
+            resolve=False,
+        )
+    )
+
+    fixed_generator_cfg.generators.test.min_nc = (
+        eval_nc
+    )
+    fixed_generator_cfg.generators.test.max_nc = (
+        eval_nc
+    )
+
+    # The generator target set itself is not used. The evaluator
+    # constructs its own uniformly random AR anchor set.
+    fixed_generator_cfg.generators.test.min_nt = 1
+    fixed_generator_cfg.generators.test.max_nt = 1
+
+    fixed_generator_cfg.generators.test.samples_per_epoch = (
+        num_tasks
+    )
+    fixed_generator_cfg.generators.test.batch_size = (
+        eval_batch_size
+    )
+    fixed_generator_cfg.generators.test.deterministic = (
+        True
+    )
+
+    resolved_test_cfg = OmegaConf.to_container(
+        fixed_generator_cfg.generators.test,
+        resolve=True,
+    )
+
+    set_seed(seed)
+
+    generator = instantiate(
+        resolved_test_cfg
+    )
+
+    loader = torch.utils.data.DataLoader(
+        generator,
+        batch_size=None,
+        num_workers=0,
+    )
+
+    all_rows: List[Dict[str, Any]] = []
+    task_offset = 0
+
+    for batch_index, batch in enumerate(loader):
+        batch = move_batch_to_device(
+            batch,
+            device,
+        )
+
+        batch_size = int(
+            batch.xc.shape[0]
+        )
+
+        # One independently random support set per task.
+        anchor_generator = torch.Generator(
+            device="cpu"
+        )
+
+        anchor_generator.manual_seed(
+            anchor_seed + batch_index
+        )
+
+        unit_anchor = torch.rand(
+            batch_size,
+            num_anchors,
+            1,
+            generator=anchor_generator,
+            dtype=torch.float32,
+        )
+
+        x_anchor = (
+            anchor_min
+            + (
+                anchor_max
+                - anchor_min
+            ) * unit_anchor
+        ).to(
+            device=device,
+            dtype=batch.xc.dtype,
+        )
+
+        x_anchor = torch.sort(
+            x_anchor,
+            dim=1,
+        ).values.contiguous()
+
+        gt = getattr(
+            batch,
+            "gt_pred",
+            None,
+        )
+
+        if (
+            gt is None
+            or not hasattr(
+                gt,
+                "latent_function",
+            )
+        ):
+            raise RuntimeError(
+                "Sawtooth batch must expose "
+                "gt_pred.latent_function(...)."
+            )
+
+        y_anchor = gt.latent_function(
+            x_anchor
+        ).to(
+            device=device,
+            dtype=batch.yc.dtype,
+        )
+
+        ar_batch = dataclasses.replace(
+            batch,
+            xt=x_anchor,
+            yt=y_anchor,
+        )
+
+        for item in models:
+            model_seed = (
+                seed
+                + 1_000_000
+                + batch_index
+            )
+
+            # Warm up the first batch before recording runtime.
+            if batch_index == 0:
+                set_seed(model_seed)
+
+                _ = autoregressive_sample_model(
+                    model=item["model"],
+                    batch=ar_batch,
+                    num_samples=min(
+                        2,
+                        num_ar_samples,
+                    ),
+                    target_order=target_order,  # type: ignore[arg-type]
+                    stochln_noise_mode=stochln_noise_mode,  # type: ignore[arg-type]
+                )
+
+                if device.type == "cuda":
+                    torch.cuda.synchronize()
+
+            # Reset before each model so the target permutations are
+            # shared across models for the same task batch.
+            set_seed(model_seed)
+
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+
+            start = time.perf_counter()
+
+            samples = autoregressive_sample_model(
+                model=item["model"],
+                batch=ar_batch,
+                num_samples=num_ar_samples,
+                target_order=target_order,  # type: ignore[arg-type]
+                stochln_noise_mode=stochln_noise_mode,  # type: ignore[arg-type]
+            )
+
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+
+            elapsed = (
+                time.perf_counter()
+                - start
+            )
+
+            rows = metric_rows_for_batch(
+                samples=samples,
+                target=y_anchor,
+                nc=eval_nc,
+                source=item["name"],
+                task_offset=task_offset,
+            )
+
+            runtime_per_task = (
+                elapsed
+                / float(batch_size)
+            )
+
+            for row in rows:
+                row["runtime_s_per_task"] = (
+                    runtime_per_task
+                )
+
+            all_rows.extend(rows)
+
+        # Explicit climatological baseline on the same targets.
+        set_seed(
+            seed
+            + 2_000_000
+            + batch_index
+        )
+
+        trivial_samples = torch.rand(
+            (
+                num_ar_samples,
+                *y_anchor.shape,
+            ),
+            device=device,
+            dtype=y_anchor.dtype,
+        )
+
+        trivial_rows = metric_rows_for_batch(
+            samples=trivial_samples,
+            target=y_anchor,
+            nc=eval_nc,
+            source="Trivial U(0,1)",
+            task_offset=task_offset,
+        )
+
+        for row in trivial_rows:
+            row["runtime_s_per_task"] = 0.0
+
+        all_rows.extend(trivial_rows)
+
+        task_offset += batch_size
+
+        if (batch_index + 1) % 100 == 0:
+            print(
+                f"Processed {task_offset:,}/"
+                f"{num_tasks:,} test tasks."
+            )
+
+    if task_offset != num_tasks:
+        raise RuntimeError(
+            f"Expected {num_tasks} tasks, processed {task_offset}."
+        )
+
+    per_task = pd.DataFrame(all_rows)
+    summary = summarise(per_task)
+
+    per_task_path = (
+        output_dir
+        / "sawtooth_ar_per_task.csv"
+    )
+    summary_path = (
+        output_dir
+        / "sawtooth_ar_summary.csv"
+    )
+    resolved_path = (
+        output_dir
+        / "sawtooth_ar_resolved.json"
+    )
+
+    per_task.to_csv(
+        per_task_path,
+        index=False,
+    )
+    summary.to_csv(
+        summary_path,
+        index=False,
+    )
+
+    with open(resolved_path, "w") as file:
+        json.dump(
+            {
+                "config": cfg,
+                "cli": vars(args),
+                "resolved": {
+                    "evaluation_mode": "ar_anchors",
+                    "metrics_on": (
+                        "raw AR predictive samples at "
+                        "the sampled anchor locations"
+                    ),
+                    "num_tasks": num_tasks,
+                    "num_ar_samples": num_ar_samples,
+                    "eval_batch_size": eval_batch_size,
+                    "eval_nc": eval_nc,
+                    "num_ar_anchors": num_anchors,
+                    "final_context_size": (
+                        eval_nc + num_anchors
+                    ),
+                    "target_order": target_order,
+                    "stochln_noise_mode": (
+                        stochln_noise_mode
+                    ),
+                    "seed": seed,
+                    "anchor_seed": anchor_seed,
+                },
+            },
+            file,
+            indent=2,
+        )
+
+
+    display_columns = [
+        "nc",
+        "source",
+        "rmse",
+        "crps",
+        "energy",
+        "coverage90",
+        "coverage95",
+        "width90",
+        "width95",
+        "runtime_s_per_task",
+    ]
+
+    print("\n=== Sawtooth AR-anchor evaluation ===")
+
+    print(
+        summary[display_columns].to_string(
+            index=False,
+            float_format=lambda value: f"{value:.6f}",
+        )
+    )
+
+    print(f"\nSaved {per_task_path}")
+    print(f"Saved {summary_path}")
+    print(f"Saved {resolved_path}")
+
 
 
 @torch.inference_mode()
@@ -362,6 +900,21 @@ def main() -> None:
             "Expected evaluation config to resolve to a dictionary, "
             f"got {type(cfg)}."
         )
+
+    evaluation_mode = str(
+        args.evaluation_mode
+        or cfg.get(
+            "evaluation_mode",
+            "one_shot",
+        )
+    )
+
+    if evaluation_mode == "ar_anchors":
+        run_ar_anchor_evaluation(
+            args=args,
+            cfg=cfg,
+        )
+        return
 
     output_dir = Path(
         args.output_dir

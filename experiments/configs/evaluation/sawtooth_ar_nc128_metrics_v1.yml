@@ -1,0 +1,48 @@
+evaluation_mode: ar_anchors
+
+output_dir: results/sawtooth/ar_nc128_metrics_v1
+refuse_overwrite: true
+device: cuda
+
+base_generator_config: experiments/configs/generators/sawtooth_1d_interpolation_nc128.yml
+
+# Development evaluation; override with 40,000/80,000 for final results.
+num_tasks: 4096
+
+# Mortimer's default number of AR samples.
+num_ar_samples: 50
+
+eval_batch_size: 8
+
+# 112 initial observations + 16 sampled AR anchors = 128.
+eval_nc: 112
+num_ar_anchors: 16
+training_max_nc: 128
+
+ar_anchor_range: [-2.0, 2.0]
+anchor_seed: 20260720
+
+target_order: random
+stochln_noise_mode: refresh
+
+seed: 20260720
+
+table_caption: >-
+  Autoregressive predictive performance on the sawtooth process over
+  {num_tasks:,} independent test tasks. Each task uses {num_ar_samples}
+  autoregressive rollouts, an initial context of size $N_c={eval_nc}$,
+  and {num_ar_anchors} uniformly sampled autoregressive anchors.
+
+table_label: tab:sawtooth-ar-nc128
+
+models:
+  - name: Dropout CRPS, trained with Nc=128
+    model_config: experiments/configs/models/tnp_crps_dropout_fourier.yml
+    checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-fourier-dropout-nc128/sawtooth-fourier-dropout-nc128-v1/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.val_num_samples=10
+      - params.test_num_samples=64
+      - params.p_dropout=0.10
+      - params.crps_alpha=1.0
+      - model.use_mc_dropout=true

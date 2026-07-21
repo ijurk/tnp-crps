@@ -1,0 +1,37 @@
+evaluation_mode: ar_anchors
+
+output_dir: results/sawtooth/ar_context_ladder_nc48_64_v1
+refuse_overwrite: true
+device: cuda
+
+base_generator_config: experiments/configs/generators/sawtooth_1d_interpolation_nc48_64.yml
+
+# Development evaluation. Override with 80,000 for final results.
+num_tasks: 4096
+num_ar_samples: 50
+eval_batch_size: 8
+
+# Rollout contexts traverse 48, 49, ..., 64.
+eval_nc: 48
+num_ar_anchors: 16
+training_max_nc: 64
+
+ar_anchor_range: [-2.0, 2.0]
+anchor_seed: 20260720
+
+target_order: random
+stochln_noise_mode: refresh
+
+seed: 20260720
+
+models:
+  - name: Dropout CRPS, train Nc 48-64
+    model_config: experiments/configs/models/tnp_crps_dropout_fourier.yml
+    checkpoint_path: checkpoints/sawtooth_context_ladder/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-nc48-64/sawtooth-dropout-fourier-nc48-64-v1/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.val_num_samples=10
+      - params.test_num_samples=64
+      - params.p_dropout=0.10
+      - params.crps_alpha=1.0
+      - model.use_mc_dropout=true

@@ -248,8 +248,8 @@ def make_ar_prediction_row(
         )
 
         row_suffix = "AR denoised"
-        sample_path_label = "Denoised sample paths"
-        interval_label = "95% denoised path envelope"
+        sample_path_label = "Denoised AR paths"
+        interval_label = "95% pointwise envelope of denoised AR paths"
 
     else:
         # Raw samples can only be plotted directly when their support inputs
@@ -589,10 +589,12 @@ def make_one_ar_plot(
         f"M_AR={num_ar_samples}"
     )
 
-    y_lim = plot_spec.get(
-        "y_lim",
-        None,
-    )
+    figure_title = plot_spec.get("figure_title", None)
+
+    if figure_title is not None:
+        title = str(figure_title)
+
+    y_lim = plot_spec.get("y_lim", None)
 
     if y_lim is not None:
         y_lim = (
@@ -600,10 +602,7 @@ def make_one_ar_plot(
             float(y_lim[1]),
         )
 
-    output_path_base = (
-        output_dir
-        / plot_spec["name"]
-    )
+    output_path_base = (output_dir / plot_spec["name"])
 
     plot_function_comparison(
         batch=batch,
@@ -653,6 +652,16 @@ def main() -> None:
     )
 
     output_dir = Path(args.output_dir or cfg["output_dir"])
+
+    refuse_overwrite = bool(cfg.get("refuse_overwrite", False))
+
+    if (refuse_overwrite and output_dir.exists() and any(output_dir.iterdir())):
+        raise FileExistsError(
+            "Output directory already contains files: "
+            f"{output_dir}. "
+            "Use a new versioned output directory."
+        )
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # AR plotting defaults are deliberately conservative. If the normal function
