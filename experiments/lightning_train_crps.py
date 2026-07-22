@@ -70,6 +70,17 @@ def main():
     )
 
     def plot_fn(model, batches, name):
+        """Plot only data supported by the existing 1-D plotting utility."""
+        if len(batches) == 0:
+            return
+
+        first_batch = batches[0]
+    
+        # The existing plot() utility is for one-dimensional input locations.
+        # Tabular tasks have dim_x > 1 and are evaluated separately.
+        if first_batch.xc.shape[-1] != 1:
+            return
+            
         plot(
             model=model,
             batches=batches,
@@ -91,7 +102,36 @@ def main():
             ckpt_file = os.path.join(artifact_dir, "model.ckpt")
     else:
         ckpt_file = None
-        
+
+    # Resolve evaluation sample counts without assuming that every model
+    # exposes a training-ensemble `num_samples` attribute. Gaussian TNPs
+    # define an analytic predictive distribution and therefore do not.
+    model_num_samples = getattr(model, "num_samples", None)
+
+    val_num_samples = getattr(experiment.params, "val_num_samples", model_num_samples)
+    test_num_samples = getattr(experiment.params, "test_num_samples", model_num_samples)
+
+    if val_num_samples is None:
+        raise ValueError(
+            "params.val_num_samples must be specified for models "
+            "without a num_samples attribute, such as the Gaussian TNP."
+        )
+
+    if test_num_samples is None:
+        raise ValueError(
+            "params.test_num_samples must be specified for models "
+            "without a num_samples attribute, such as the Gaussian TNP."
+        )
+
+    val_num_samples = int(val_num_samples)
+    test_num_samples = int(test_num_samples)
+
+    if val_num_samples < 1:
+        raise ValueError("params.val_num_samples must be positive, " f"got {val_num_samples}.")
+
+    if test_num_samples < 1:
+        raise ValueError("params.test_num_samples must be positive, " f"got {test_num_samples}.")
+
     lit_model = LitWrapper(
         model=model,
         optimiser=optimiser,
@@ -100,9 +140,9 @@ def main():
         pred_fn=np_pred_fn,
         plot_fn=plot_fn,
         plot_interval=experiment.misc.plot_interval,
-        val_num_samples=getattr(experiment.params, "val_num_samples", model.num_samples),
-        test_num_samples=getattr(experiment.params, "test_num_samples", model.num_samples),
-        )
+        val_num_samples=val_num_samples,
+        test_num_samples=test_num_samples,
+    )
 
     # --------------------------------------------------------------
     # Weights-only warm start.
