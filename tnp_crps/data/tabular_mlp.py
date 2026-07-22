@@ -383,42 +383,42 @@ class CausalMLPPrior:
 
     def _init_model(self):
         """Initialize and freeze the sampled MLP mechanism.
-    
+
         The layers stored in ``self.model`` are wrapper modules, so the
         underlying ``nn.Linear`` must be accessed through ``linear_layer``.
         """
         with torch.no_grad():
             for layer_index, layer in enumerate(self.model):
                 layer.requires_grad_(False)
-    
+
                 linear = getattr(layer, "linear_layer", None)
                 if not isinstance(linear, nn.Linear):
                     raise TypeError(
                         "Expected every sampled prior layer to expose an "
                         f"nn.Linear as 'linear_layer', got {type(layer).__name__}."
                     )
-    
+
                 if linear.bias is not None:
                     nn.init.zeros_(linear.bias)
-    
+
                 nn.init.normal_(
                     linear.weight,
                     mean=0.0,
                     std=float(self.init_std),
                 )
-    
+
                 # Preserve the original intention: do not sparsify the first
                 # layer, but sparsify subsequent mechanism layers.
                 if layer_index > 0 and self.dropout_prob > 0.0:
                     keep_probability = 1.0 - float(self.dropout_prob)
-    
+
                     mask = torch.bernoulli(
                         torch.full_like(
                             linear.weight,
                             keep_probability,
                         )
                     )
-    
+
                     linear.weight.mul_(mask)
 
     def _sample_causes(
@@ -570,11 +570,11 @@ class CausalMLPPrior:
                     categorical_features_indices.append(i)
 
         x = self._convert_to_categorical(x, categorical_features_indices)
-        
+
         if apply_x_outlier_processing:
             outlier_handler = OutlierHandler(self.device)
             x = outlier_handler.remove_outliers(x,method="zscore")
-        
+
         return x, y
 
 
@@ -897,7 +897,7 @@ class MLPTabularTaskSource:
         }
 
         return x_raw, y_raw, metadata
-        
+
 
 def tabular_dataset_simulator_sklearn_demo(
     config: Optional[dict] = None, device: Optional[str] = None

@@ -20,8 +20,8 @@ def get_project_root() -> str:
 
 def main():
     experiment = initialize_experiment()
-    
-    # added for local checkpoints and naming 
+
+    # added for local checkpoints and naming
     project_root = get_project_root()
     run_group = getattr(experiment.misc, "run_group", None)
     run_id = getattr(experiment.misc, "run_id", None) or os.environ.get("TNP_RUN_ID", "default-run")
@@ -75,12 +75,12 @@ def main():
             return
 
         first_batch = batches[0]
-    
+
         # The existing plot() utility is for one-dimensional input locations.
         # Tabular tasks have dim_x > 1 and are evaluated separately.
         if first_batch.xc.shape[-1] != 1:
             return
-            
+
         plot(
             model=model,
             batches=batches,
