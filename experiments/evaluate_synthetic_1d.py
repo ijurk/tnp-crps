@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import math
 import os
 from typing import Any, Dict, List, Optional
 
@@ -282,6 +283,84 @@ def sample_tabular_baseline(
     )
 
 
+def resolve_training_alpha(
+    *,
+    model_entry: Dict[str, Any],
+    config: Any,
+    is_learned_model: bool,
+) -> Optional[float]:
+    """Resolve and validate the CRPS alpha used during training.
+
+    Resolution order:
+
+    1. Explicit ``training_alpha`` in the evaluation model entry.
+    2. ``config.params.crps_alpha`` from the resolved model configuration.
+    3. ``None`` for models or baselines not trained with CRPS.
+
+    When both an explicit value and a configuration value are available,
+    they must agree. This catches stale evaluation metadata or a missing
+    training override.
+    """
+    config_alpha_raw = None
+
+    if is_learned_model and hasattr(config, "params"):
+        config_alpha_raw = getattr(
+            config.params,
+            "crps_alpha",
+            None,
+        )
+
+    has_explicit_alpha = "training_alpha" in model_entry
+
+    if has_explicit_alpha:
+        resolved_raw = model_entry["training_alpha"]
+    else:
+        resolved_raw = config_alpha_raw
+
+    if resolved_raw is None:
+        training_alpha = None
+    else:
+        training_alpha = float(resolved_raw)
+
+        if not 0.0 <= training_alpha <= 1.0:
+            raise ValueError(
+                "training_alpha must be in [0, 1] or null. "
+                f"Got {training_alpha} for "
+                f"model={model_entry.get('name', '<unnamed>')}."
+            )
+
+    if not is_learned_model and training_alpha is not None:
+        raise ValueError(
+            "Context baselines must use training_alpha: null. "
+            f"Got {training_alpha} for "
+            f"source={model_entry.get('name', '<unnamed>')}."
+        )
+
+    if has_explicit_alpha and config_alpha_raw is not None:
+        config_alpha = float(config_alpha_raw)
+
+        if (
+            training_alpha is None
+            or not math.isclose(
+                training_alpha,
+                config_alpha,
+                rel_tol=0.0,
+                abs_tol=1.0e-12,
+            )
+        ):
+            raise ValueError(
+                "Explicit training_alpha does not match the resolved "
+                "model configuration. "
+                f"model={model_entry.get('name', '<unnamed>')}, "
+                f"training_alpha={training_alpha}, "
+                f"config.params.crps_alpha={config_alpha}. "
+                "Add the training-time alpha override to the model entry's "
+                "'overrides' list or correct the metadata."
+            )
+
+    return training_alpha
+
+
 def evaluate_one_model_on_one_set(
     *,
     model_entry: Dict[str, Any],
@@ -353,6 +432,12 @@ def evaluate_one_model_on_one_set(
         overrides=model_overrides + eval_overrides,
     )
 
+    training_alpha = resolve_training_alpha(
+        model_entry=model_entry,
+        config=config,
+        is_learned_model=is_learned_model,
+    )
+
     if kernel_name is not None:
         apply_eval_kernel(config, kernel_name)
 
@@ -408,6 +493,12 @@ def evaluate_one_model_on_one_set(
     resolved_metric_alpha = float(
         eval_set.get("metric_alpha", metric_alpha)
     )
+
+    if not 0.0 <= resolved_metric_alpha <= 1.0:
+        raise ValueError(
+            "Resolved metric_alpha must be in [0, 1]. "
+            f"Got {resolved_metric_alpha} for eval_set={eval_name}."
+        )
 
     # Reset after model construction so predictive Monte Carlo randomness is
     # not affected by architecture-specific parameter initialization.
@@ -468,6 +559,10 @@ def evaluate_one_model_on_one_set(
                 eval_set=eval_name,
                 alpha=resolved_metric_alpha,
             )
+
+        for metric_row in batch_rows:
+            metric_row["training_alpha"] = training_alpha
+            metric_row["metric_alpha"] = resolved_metric_alpha
 
         rows.extend(batch_rows)
 
@@ -586,6 +681,8 @@ def main() -> None:
 
     display_cols = [
         "model_name",
+        "training_alpha",
+        "metric_alpha",
         "eval_set",
         "region",
         "context_bucket",

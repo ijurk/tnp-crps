@@ -332,6 +332,8 @@ def finalise_metric_rows(rows: List[Dict[str, float]]) -> pd.DataFrame:
 
     group_cols = [
         "model_name",
+        "training_alpha",
+        "metric_alpha",
         "checkpoint_path",
         "eval_set",
         "region",
@@ -349,9 +351,9 @@ def finalise_metric_rows(rows: List[Dict[str, float]]) -> pd.DataFrame:
         )
     ]
 
-    summed = raw.groupby(group_cols, as_index=False)[sum_cols].sum()
+    summed = raw.groupby(group_cols, as_index=False, dropna=False)[sum_cols].sum()
 
-    first_cols = raw.groupby(group_cols, as_index=False)["num_eval_samples"].first()
+    first_cols = raw.groupby(group_cols, as_index=False, dropna=False)["num_eval_samples"].first()
     out = summed.merge(first_cols, on=group_cols, how="left")
 
     out["rmse_pooled"] = (out["sse"] / out["numel"]).pow(0.5)
@@ -378,6 +380,8 @@ def finalise_metric_rows(rows: List[Dict[str, float]]) -> pd.DataFrame:
 
     preferred_cols = [
         "model_name",
+        "training_alpha",
+        "metric_alpha",
         "eval_set",
         "region",
         "context_bucket",
