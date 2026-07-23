@@ -18,7 +18,7 @@ from tnp.utils.experiment_utils import deep_convert_dict, extract_config
 from tnp_crps.models.tnp_crps import DirectTNP
 from tnp_crps.utils.np_functions import np_pred_fn
 
-from evaluation.metrics import batch_metric_rows, finalise_metric_rows
+from evaluation.metrics import batch_metric_rows, batch_metric_rows_tabular, finalise_metric_rows
 
 
 def parse_args() -> argparse.Namespace:
@@ -172,6 +172,116 @@ def sample_model(
     return pred_dist.sample((num_eval_samples,))
 
 
+@torch.no_grad()
+def sample_tabular_baseline(
+    *,
+    baseline_kind: str,
+    batch: Batch,
+    num_eval_samples: int,
+    epsilon: float = 1.0e-6,
+) -> torch.Tensor:
+    """Return baseline samples with shape [M, B, Nt, Dy].
+
+    Supported baselines:
+
+    ``context_mean``
+        Repeats the context target mean as a deterministic prediction.
+
+    ``context_gaussian``
+        Samples independently from a Gaussian fitted to the context targets.
+
+    ``context_resample``
+        Resamples observed context targets with replacement independently for
+        every target position and ensemble member.
+    """
+    num_eval_samples = int(num_eval_samples)
+
+    if num_eval_samples < 2:
+        raise ValueError(
+            "Tabular baseline evaluation requires at least two samples, "
+            f"got {num_eval_samples}."
+        )
+
+    yc = batch.yc
+    batch_size = yc.shape[0]
+    num_context = yc.shape[1]
+    num_targets = batch.yt.shape[1]
+    dim_y = yc.shape[-1]
+
+    context_mean = yc.mean(dim=1, keepdim=True)
+
+    if baseline_kind == "context_mean":
+        return (
+            context_mean.unsqueeze(0)
+            .expand(
+                num_eval_samples,
+                batch_size,
+                num_targets,
+                dim_y,
+            )
+            .clone()
+        )
+
+    if baseline_kind == "context_gaussian":
+        context_std = yc.std(
+            dim=1,
+            unbiased=False,
+            keepdim=True,
+        ).clamp_min(float(epsilon))
+
+        noise = torch.randn(
+            num_eval_samples,
+            batch_size,
+            num_targets,
+            dim_y,
+            device=yc.device,
+            dtype=yc.dtype,
+        )
+
+        return (
+            context_mean.unsqueeze(0)
+            + context_std.unsqueeze(0) * noise
+        )
+
+    if baseline_kind == "context_resample":
+        indices = torch.randint(
+            low=0,
+            high=num_context,
+            size=(
+                num_eval_samples,
+                batch_size,
+                num_targets,
+            ),
+            device=yc.device,
+        )
+
+        source = yc.unsqueeze(0).expand(
+            num_eval_samples,
+            batch_size,
+            num_context,
+            dim_y,
+        )
+
+        gather_indices = indices.unsqueeze(-1).expand(
+            num_eval_samples,
+            batch_size,
+            num_targets,
+            dim_y,
+        )
+
+        return torch.gather(
+            source,
+            dim=2,
+            index=gather_indices,
+        )
+
+    raise ValueError(
+        "Unknown tabular baseline kind "
+        f"{baseline_kind!r}. Expected one of: "
+        "'context_mean', 'context_gaussian', 'context_resample'."
+    )
+
+
 def evaluate_one_model_on_one_set(
     *,
     model_entry: Dict[str, Any],
@@ -182,47 +292,86 @@ def evaluate_one_model_on_one_set(
     eval_batch_size: Optional[int],
     max_batches: Optional[int],
     device: torch.device,
+    evaluation_kind: str,
+    metric_alpha: float,
+    sampling_seed: int,
 ) -> List[Dict[str, Any]]:
     model_name = model_entry["name"]
-    model_config = model_entry["model_config"]
-    checkpoint_path = model_entry["checkpoint_path"]
+    entry_kind = str(model_entry.get("kind", "model"))
     model_overrides = list(model_entry.get("overrides", []) or [])
+
+    supported_baselines = {
+        "context_mean",
+        "context_gaussian",
+        "context_resample",
+    }
+
+    is_learned_model = entry_kind == "model"
+
+    if is_learned_model:
+        model_config = model_entry["model_config"]
+        checkpoint_path = model_entry["checkpoint_path"]
+        config_paths = [
+            base_generator_config,
+            model_config,
+        ]
+    elif entry_kind in supported_baselines:
+        model_config = None
+        checkpoint_path = f"<baseline:{entry_kind}>"
+        config_paths = [base_generator_config]
+    else:
+        raise ValueError(
+            f"Unknown model-entry kind {entry_kind!r}. "
+            "Expected 'model' or one of "
+            f"{sorted(supported_baselines)}."
+        )
 
     eval_name = eval_set["name"]
     kernel_name = eval_set.get("kernel", None)
     eval_overrides = list(eval_set.get("overrides", []) or [])
 
     print("=" * 80)
-    print(f"Evaluating model={model_name}")
+    print(f"Evaluating source={model_name}, kind={entry_kind}")
+
     if kernel_name is None:
         print(f"Eval set={eval_name}")
     else:
         print(f"Eval set={eval_name}, kernel={kernel_name}")
-    print(f"Checkpoint={checkpoint_path}")
+
+    if is_learned_model:
+        print(f"Checkpoint={checkpoint_path}")
+
     print("=" * 80)
 
-    if not os.path.exists(checkpoint_path):
-        raise FileNotFoundError(f"Checkpoint does not exist: {checkpoint_path}")
+    if is_learned_model and not os.path.exists(checkpoint_path):
+        raise FileNotFoundError(
+            f"Checkpoint does not exist: {checkpoint_path}"
+        )
 
     config = load_merged_config(
-        config_paths=[base_generator_config, model_config],
+        config_paths=config_paths,
         overrides=model_overrides + eval_overrides,
     )
-    
+
     if kernel_name is not None:
         apply_eval_kernel(config, kernel_name)
+
     apply_eval_dataset_overrides(
         config,
         samples_per_eval_set=samples_per_eval_set,
         eval_batch_size=eval_batch_size,
     )
 
+    # Seed model construction and generator construction.
     pl.seed_everything(int(config.misc.seed))
 
-    model = instantiate(config.model)
-    load_model_state(model, checkpoint_path)
-    model.to(device)
-    model.eval()
+    model = None
+
+    if is_learned_model:
+        model = instantiate(config.model)
+        load_model_state(model, checkpoint_path)
+        model.to(device)
+        model.eval()
 
     generator = instantiate(config.generators.test)
 
@@ -233,8 +382,36 @@ def evaluate_one_model_on_one_set(
         pin_memory=False,
     )
 
-    context_range = OmegaConf.to_container(config.params.context_range, resolve=True)
-    alpha = float(getattr(config.params, "crps_alpha", 1.0))
+    if evaluation_kind == "synthetic_1d":
+        if not hasattr(config.params, "context_range"):
+            raise ValueError(
+                "synthetic_1d evaluation requires params.context_range."
+            )
+
+        context_range = OmegaConf.to_container(
+            config.params.context_range,
+            resolve=True,
+        )
+
+    elif evaluation_kind == "tabular":
+        context_range = None
+
+    else:
+        raise ValueError(
+            f"Unknown evaluation_kind={evaluation_kind!r}. "
+            "Expected 'synthetic_1d' or 'tabular'."
+        )
+
+    resolved_sampling_seed = int(
+        eval_set.get("sampling_seed", sampling_seed)
+    )
+    resolved_metric_alpha = float(
+        eval_set.get("metric_alpha", metric_alpha)
+    )
+
+    # Reset after model construction so predictive Monte Carlo randomness is
+    # not affected by architecture-specific parameter initialization.
+    pl.seed_everything(resolved_sampling_seed)
 
     rows: List[Dict[str, Any]] = []
 
@@ -244,27 +421,61 @@ def evaluate_one_model_on_one_set(
 
         batch = move_batch_to_device(batch, device)
 
-        samples = sample_model(
-            model=model,
-            batch=batch,
-            num_eval_samples=num_eval_samples,
-        )
+        if is_learned_model:
+            assert model is not None
 
-        batch_rows = batch_metric_rows(
-            samples=samples,
-            target=batch.yt,
-            xt=batch.xt,
-            num_context=batch.xc.shape[1],
-            context_range=context_range,
-            model_name=model_name,
-            checkpoint_path=checkpoint_path,
-            eval_set=eval_name,
-            alpha=alpha,
-        )
+            samples = sample_model(
+                model=model,
+                batch=batch,
+                num_eval_samples=num_eval_samples,
+            )
+
+        else:
+            if evaluation_kind != "tabular":
+                raise ValueError(
+                    "The context-based baselines are currently defined only "
+                    "for tabular evaluation."
+                )
+
+            samples = sample_tabular_baseline(
+                baseline_kind=entry_kind,
+                batch=batch,
+                num_eval_samples=num_eval_samples,
+            )
+
+        if evaluation_kind == "tabular":
+            batch_rows = batch_metric_rows_tabular(
+                samples=samples,
+                target=batch.yt,
+                num_context=batch.xc.shape[1],
+                model_name=model_name,
+                checkpoint_path=checkpoint_path,
+                eval_set=eval_name,
+                alpha=resolved_metric_alpha,
+            )
+
+        else:
+            assert context_range is not None
+
+            batch_rows = batch_metric_rows(
+                samples=samples,
+                target=batch.yt,
+                xt=batch.xt,
+                num_context=batch.xc.shape[1],
+                context_range=context_range,
+                model_name=model_name,
+                checkpoint_path=checkpoint_path,
+                eval_set=eval_name,
+                alpha=resolved_metric_alpha,
+            )
+
         rows.extend(batch_rows)
 
         if batch_idx % 25 == 0:
-            print(f"  processed batch {batch_idx + 1}/{generator.num_batches}")
+            print(
+                f"  processed batch "
+                f"{batch_idx + 1}/{generator.num_batches}"
+            )
 
     return rows
 
@@ -302,6 +513,30 @@ def main() -> None:
 
     device = torch.device(device_name)
 
+    evaluation_kind = str(
+        eval_config.get("evaluation_kind", "synthetic_1d")
+    )
+
+    if evaluation_kind not in {"synthetic_1d", "tabular"}:
+        raise ValueError(
+            f"Unknown evaluation_kind={evaluation_kind!r}."
+        )
+
+    # Every source is evaluated with the same scoring rule, independently of
+    # the objective or alpha value used during training.
+    metric_alpha = float(
+        eval_config.get("metric_alpha", 1.0)
+    )
+
+    if not 0.0 <= metric_alpha <= 1.0:
+        raise ValueError(
+            f"metric_alpha must be in [0, 1], got {metric_alpha}."
+        )
+
+    sampling_seed = int(
+        eval_config.get("sampling_seed", 20260724)
+    )
+
     os.makedirs(output_dir, exist_ok=True)
 
     with open(os.path.join(output_dir, "eval_config_resolved.json"), "w") as f:
@@ -320,6 +555,9 @@ def main() -> None:
                 eval_batch_size=eval_batch_size,
                 max_batches=max_batches,
                 device=device,
+                evaluation_kind=evaluation_kind,
+                metric_alpha=metric_alpha,
+                sampling_seed=sampling_seed,
             )
             all_rows.extend(rows)
 

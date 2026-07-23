@@ -277,6 +277,52 @@ def batch_metric_rows(
     return rows
 
 
+def batch_metric_rows_tabular(
+    *,
+    samples: torch.Tensor,
+    target: torch.Tensor,
+    num_context: int,
+    model_name: str,
+    checkpoint_path: str,
+    eval_set: str,
+    alpha: float = 1.0,
+) -> List[Dict[str, float]]:
+    """Return metric-sum rows for a tabular regression batch.
+
+    Unlike the 1-D evaluator, tabular inputs do not have interpolation and
+    extrapolation regions. Results are reported for all targets and under an
+    exact context-size label such as ``nc_128``.
+    """
+    metric_row = metric_sums_for_mask(
+        samples=samples,
+        target=target,
+        mask=None,
+        alpha=alpha,
+    )
+
+    if metric_row is None:
+        return []
+
+    exact_bucket = f"nc_{int(num_context):03d}"
+    rows: List[Dict[str, float]] = []
+
+    for bucket_name in ("all", exact_bucket):
+        row = dict(metric_row)
+        row.update(
+            {
+                "model_name": model_name,
+                "checkpoint_path": checkpoint_path,
+                "eval_set": eval_set,
+                "region": "all",
+                "context_bucket": bucket_name,
+                "num_context": int(num_context),
+            }
+        )
+        rows.append(row)
+
+    return rows
+
+
 def finalise_metric_rows(rows: List[Dict[str, float]]) -> pd.DataFrame:
     """Aggregate additive metric rows into final scalar metrics."""
     raw = pd.DataFrame(rows)
