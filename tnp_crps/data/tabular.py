@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Optional, Protocol, Tuple
 
 import torch
+import math
 
 from tnp.data.base import GroundTruthPredictor
 from tnp.data.synthetic import SyntheticBatch, SyntheticGenerator
@@ -98,6 +99,8 @@ class TabularRegressionGenerator(SyntheticGenerator):
         epsilon: float = 1.0e-6,
         min_context_target_std: float = 1.0e-4,
         max_task_attempts: int = 32,
+        max_abs_standardized_input: float = 50.0,
+        max_abs_standardized_target: float = 50.0,
         permute_features: bool = True,
         **kwargs,
     ):
@@ -110,6 +113,8 @@ class TabularRegressionGenerator(SyntheticGenerator):
             min_context_target_std
         )
         self.max_task_attempts = int(max_task_attempts)
+        self.max_abs_standardized_input = float(max_abs_standardized_input)
+        self.max_abs_standardized_target = float(max_abs_standardized_target)
         self.permute_features = bool(permute_features)
 
         if not hasattr(self.source, "sample_task"):
@@ -140,6 +145,16 @@ class TabularRegressionGenerator(SyntheticGenerator):
         if self.max_task_attempts < 1:
             raise ValueError(
                 "max_task_attempts must be at least one."
+            )
+
+        if self.max_abs_standardized_input <= 0.0:
+            raise ValueError(
+                "max_abs_standardized_input must be positive."
+            )
+
+        if self.max_abs_standardized_target <= 0.0:
+            raise ValueError(
+                "max_abs_standardized_target must be positive."
             )
 
     def _sample_one_task(
@@ -233,12 +248,48 @@ class TabularRegressionGenerator(SyntheticGenerator):
                 zero_constant_dimensions=True,
             )
 
+            max_abs_input = float(
+                torch.maximum(
+                    xc.abs().max(),
+                    xt.abs().max(),
+                ).item()
+            )
+
+            if (
+                not math.isfinite(max_abs_input)
+                or max_abs_input > self.max_abs_standardized_input
+            ):
+                last_rejection = (
+                    "standardized input magnitude exceeds support bound: "
+                    f"max_abs_x={max_abs_input:.6g}, "
+                    f"bound={self.max_abs_standardized_input:.6g}"
+                )
+                continue
+
             yc, yt, _, _ = _standardize_from_context(
                 yc_raw,
                 yt_raw,
                 epsilon=self.epsilon,
                 zero_constant_dimensions=False,
             )
+
+            max_abs_target = float(
+                torch.maximum(
+                    yc.abs().max(),
+                    yt.abs().max(),
+                ).item()
+            )
+
+            if (
+                not math.isfinite(max_abs_target)
+                or max_abs_target > self.max_abs_standardized_target
+            ):
+                last_rejection = (
+                    "standardized target magnitude exceeds support bound: "
+                    f"max_abs_y={max_abs_target:.6g}, "
+                    f"bound={self.max_abs_standardized_target:.6g}"
+                )
+                continue
 
             x = torch.cat([xc, xt], dim=0)
             y = torch.cat([yc, yt], dim=0)

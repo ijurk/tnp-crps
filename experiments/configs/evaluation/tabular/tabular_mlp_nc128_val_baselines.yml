@@ -1,4 +1,4 @@
-output_dir: results/tabular/mlp_nc128_val_baselines_v1
+output_dir: results/tabular/mlp_nc128_val_baselines_v2
 
 evaluation_kind: tabular
 metric_alpha: 1.0

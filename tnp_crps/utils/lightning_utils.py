@@ -58,6 +58,15 @@ class LitWrapper(pl.LightningModule):
     ) -> torch.Tensor:
         _ = batch_idx
         loss = self.loss_fn(self.model, batch)
+        if not torch.isfinite(loss):
+            raise FloatingPointError(
+                "Non-finite training loss. "
+                f"batch_idx={batch_idx}, "
+                f"xc_max={float(batch.xc.abs().max().item()):.6g}, "
+                f"yc_max={float(batch.yc.abs().max().item()):.6g}, "
+                f"xt_max={float(batch.xt.abs().max().item()):.6g}, "
+                f"yt_max={float(batch.yt.abs().max().item()):.6g}"
+            )
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
         return loss
 

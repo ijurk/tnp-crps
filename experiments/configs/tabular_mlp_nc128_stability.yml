@@ -1,0 +1,27 @@
+params:
+  epochs: 10
+
+generators:
+  train:
+    samples_per_epoch: 1600
+    batch_size: 16
+
+  val:
+    samples_per_epoch: 512
+    batch_size: 16
+
+  test:
+    samples_per_epoch: 512
+    batch_size: 16
+
+misc:
+  logging: true
+  run_group: tabular_mlp_nc128_stability
+
+  num_workers: 0
+  num_val_workers: 0
+  pin_memory: false
+
+  check_val_every_n_epoch: 1
+  checkpoint_interval: 5
+  plot_interval: 10
