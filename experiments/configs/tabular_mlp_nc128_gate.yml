@@ -1,0 +1,28 @@
+params:
+  epochs: 500
+
+generators:
+  train:
+    samples_per_epoch: 16000
+    batch_size: 16
+
+  val:
+    samples_per_epoch: 4096
+    batch_size: 16
+
+  test:
+    samples_per_epoch: 4096
+    batch_size: 16
+
+misc:
+  run_group: tabular_mlp_nc128_gate
+  logging: true
+
+  # Keep correctness-first loading for this initial gate.
+  num_workers: 0
+  num_val_workers: 0
+  pin_memory: false
+
+  check_val_every_n_epoch: 1
+  checkpoint_interval: 25
+  plot_interval: 25
