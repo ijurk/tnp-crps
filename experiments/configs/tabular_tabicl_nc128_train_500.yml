@@ -5,8 +5,8 @@ misc:
   logging: true
   run_group: tabular_tabicl_nc128_500
 
-  # Save epochs 50, 100, 150, ..., 500.
-  checkpoint_interval: 50
+  # Save epochs 25, 50, 75, ..., 500.
+  checkpoint_interval: 25
   plot_interval: 100
 
   num_workers: 2
