@@ -2,7 +2,7 @@ output_dir: results/tabular/tabicl_nc128_val_baselines_v1
 
 evaluation_kind: tabular
 metric_alpha: 1.0
-sampling_seed: 20260727
+sampling_seed: 20260724
 
 base_generator_config: experiments/configs/generators/tabular_tabicl_bank_nc128.yml
 
@@ -33,4 +33,7 @@ eval_sets:
     sampling_seed: 20260724
     overrides:
       # The generator's validation split uses this deterministic seed.
+      - generators.test.source.split=val
+      - generators.test.source.seed=20260727
+      - generators.test.source.shuffle=false
       - generators.test.deterministic_seed=20260727
