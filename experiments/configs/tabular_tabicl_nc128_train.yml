@@ -1,0 +1,12 @@
+params:
+  epochs: 100
+
+misc:
+  logging: true
+  run_group: tabular_tabicl_nc128
+  checkpoint_interval: 25
+  plot_interval: 100
+  num_workers: 2
+  num_val_workers: 0
+  pin_memory: false
+  check_val_every_n_epoch: 1

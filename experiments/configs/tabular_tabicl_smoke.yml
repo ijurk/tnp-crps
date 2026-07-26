@@ -1,0 +1,24 @@
+params:
+  epochs: 1
+
+generators:
+  train:
+    samples_per_epoch: 32
+    batch_size: 4
+
+  val:
+    samples_per_epoch: 32
+    batch_size: 4
+
+  test:
+    samples_per_epoch: 32
+    batch_size: 4
+
+misc:
+  logging: false
+  run_group: tabular_tabicl_smoke
+  checkpoint_interval: 1
+  plot_interval: 100
+  num_workers: 0
+  num_val_workers: 0
+  pin_memory: false

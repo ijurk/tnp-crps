@@ -1,0 +1,131 @@
+generators:
+  train:
+    _target_: tnp_crps.data.tabular.TabularRegressionGenerator
+    source:
+      _target_: tnp_crps.data.tabular_tabicl.TabICLGraphTaskSource
+      min_features: 2
+      max_features: 20
+      device: cpu
+      max_generation_attempts: 100
+      tabicl_commit: 46b91961db4f8873dd049ec09990698a435e1e29
+      prior_config:
+        add_gaussian_noise: false
+        allow_act_warping: false
+        allow_kumaraswamy_warping: true
+        disallow_y_warping: false
+        filter_unpredictable_datasets: false
+        filter_unpredictable_graphs: false
+        min_n_nodes: 2
+        max_n_nodes: 32
+        ensure_iid: false
+        remove_trivial_datasets: false
+
+    dim: ${params.dim_x}
+    max_input_features: ${params.dim_x}
+    epsilon: 1.0e-6
+    min_context_target_std: 1.0e-4
+    max_abs_standardized_input: 50.0
+    max_abs_standardized_target: 50.0
+    max_task_attempts: 64
+    permute_features: true
+    min_nc: 128
+    max_nc: 128
+    min_nt: 128
+    max_nt: 128
+    samples_per_epoch: 16000
+    batch_size: 16
+
+  val:
+    _target_: tnp_crps.data.tabular.TabularRegressionGenerator
+    source:
+      _target_: tnp_crps.data.tabular_tabicl.TabICLGraphTaskSource
+      min_features: 2
+      max_features: 20
+      device: cpu
+      max_generation_attempts: 100
+      tabicl_commit: 46b91961db4f8873dd049ec09990698a435e1e29
+      prior_config:
+        add_gaussian_noise: false
+        allow_act_warping: false
+        allow_kumaraswamy_warping: true
+        disallow_y_warping: false
+        filter_unpredictable_datasets: false
+        filter_unpredictable_graphs: false
+        min_n_nodes: 2
+        max_n_nodes: 32
+        ensure_iid: false
+        remove_trivial_datasets: false
+
+    dim: ${params.dim_x}
+    max_input_features: ${params.dim_x}
+    epsilon: 1.0e-6
+    min_context_target_std: 1.0e-4
+    max_abs_standardized_input: 50.0
+    max_abs_standardized_target: 50.0
+    max_task_attempts: 64
+    permute_features: true
+    min_nc: 128
+    max_nc: 128
+    min_nt: 128
+    max_nt: 128
+    samples_per_epoch: 4096
+    batch_size: 16
+    deterministic: true
+    deterministic_seed: 20260726
+
+  test:
+    _target_: tnp_crps.data.tabular.TabularRegressionGenerator
+    source:
+      _target_: tnp_crps.data.tabular_tabicl.TabICLGraphTaskSource
+      min_features: 2
+      max_features: 20
+      device: cpu
+      max_generation_attempts: 100
+      tabicl_commit: 46b91961db4f8873dd049ec09990698a435e1e29
+      prior_config:
+        add_gaussian_noise: false
+        allow_act_warping: false
+        allow_kumaraswamy_warping: true
+        disallow_y_warping: false
+        filter_unpredictable_datasets: false
+        filter_unpredictable_graphs: false
+        min_n_nodes: 2
+        max_n_nodes: 32
+        ensure_iid: false
+        remove_trivial_datasets: false
+
+    dim: ${params.dim_x}
+    max_input_features: ${params.dim_x}
+    epsilon: 1.0e-6
+    min_context_target_std: 1.0e-4
+    max_abs_standardized_input: 50.0
+    max_abs_standardized_target: 50.0
+    max_task_attempts: 64
+    permute_features: true
+    min_nc: 128
+    max_nc: 128
+    min_nt: 128
+    max_nt: 128
+    samples_per_epoch: 4096
+    batch_size: 16
+    deterministic: true
+    deterministic_seed: 20260727
+
+params:
+  dim_x: 20
+  dim_y: 1
+
+misc:
+  project: synthetic-tabular-regression
+  eval_name: test
+  seed: 1
+  num_workers: 0
+  num_val_workers: 0
+  pin_memory: false
+  only_plots: false
+  num_plots: 10
+  subplots: false
+  savefig: false
+  logging: false
+  plot_interval: 10
+  check_val_every_n_epoch: 1
