@@ -10,6 +10,10 @@ import math
 from tnp.data.base import GroundTruthPredictor
 from tnp.data.synthetic import SyntheticBatch, SyntheticGenerator
 
+from tnp_crps.data.tabular_preprocessing import (
+    tabicl_preprocess_from_context,
+)
+
 
 class TabularTaskSource(Protocol):
     """Protocol implemented by raw tabular task sources."""
@@ -84,6 +88,7 @@ class TabularRegressionGenerator(SyntheticGenerator):
     Processing order:
 
         sample raw task
+        -> optionally permute rows
         -> split context and targets
         -> fit x and y transforms on context only
         -> apply transforms to both sets
@@ -101,6 +106,10 @@ class TabularRegressionGenerator(SyntheticGenerator):
         max_task_attempts: int = 32,
         max_abs_standardized_input: float = 50.0,
         max_abs_standardized_target: float = 50.0,
+        preprocessing_mode: str = "zscore",
+        tabicl_outlier_threshold: float = 4.0,
+        tabicl_standardized_clip: float = 100.0,
+        permute_rows: bool = False,
         permute_features: bool = True,
         **kwargs,
     ):
@@ -115,6 +124,10 @@ class TabularRegressionGenerator(SyntheticGenerator):
         self.max_task_attempts = int(max_task_attempts)
         self.max_abs_standardized_input = float(max_abs_standardized_input)
         self.max_abs_standardized_target = float(max_abs_standardized_target)
+        self.preprocessing_mode = str(preprocessing_mode)
+        self.tabicl_outlier_threshold = float(tabicl_outlier_threshold)
+        self.tabicl_standardized_clip = float(tabicl_standardized_clip)
+        self.permute_rows = bool(permute_rows)
         self.permute_features = bool(permute_features)
 
         if not hasattr(self.source, "sample_task"):
@@ -156,6 +169,62 @@ class TabularRegressionGenerator(SyntheticGenerator):
             raise ValueError(
                 "max_abs_standardized_target must be positive."
             )
+
+        if self.preprocessing_mode not in {
+            "zscore",
+            "tabicl_context",
+        }:
+            raise ValueError(
+                "preprocessing_mode must be either "
+                "'zscore' or 'tabicl_context'."
+            )
+
+        if self.tabicl_outlier_threshold <= 0.0:
+            raise ValueError(
+                "tabicl_outlier_threshold must be positive."
+            )
+
+        if self.tabicl_standardized_clip <= 0.0:
+            raise ValueError(
+                "tabicl_standardized_clip must be positive."
+            )
+
+    def _preprocess_pair(
+        self,
+        context: torch.Tensor,
+        target: torch.Tensor,
+        *,
+        zero_constant_dimensions: bool,
+    ) -> Tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
+        if self.preprocessing_mode == "zscore":
+            return _standardize_from_context(
+                context,
+                target,
+                epsilon=self.epsilon,
+                zero_constant_dimensions=(
+                    zero_constant_dimensions
+                ),
+            )
+
+        return tabicl_preprocess_from_context(
+            context,
+            target,
+            epsilon=self.epsilon,
+            outlier_threshold=(
+                self.tabicl_outlier_threshold
+            ),
+            standardized_clip=(
+                self.tabicl_standardized_clip
+            ),
+            zero_constant_dimensions=(
+                zero_constant_dimensions
+            ),
+        )
 
     def _sample_one_task(
         self,
@@ -219,6 +288,14 @@ class TabularRegressionGenerator(SyntheticGenerator):
                 last_rejection = "y contains NaN or Inf"
                 continue
 
+            if self.permute_rows:
+                row_permutation = torch.randperm(
+                    total,
+                    device=x_raw.device,
+                )
+                x_raw = x_raw[row_permutation]
+                y_raw = y_raw[row_permutation]
+
             xc_raw = x_raw[:nc]
             xt_raw = x_raw[nc:]
 
@@ -241,10 +318,9 @@ class TabularRegressionGenerator(SyntheticGenerator):
                 )
                 continue
 
-            xc, xt, _, _ = _standardize_from_context(
+            xc, xt, _, _ = self._preprocess_pair(
                 xc_raw,
                 xt_raw,
-                epsilon=self.epsilon,
                 zero_constant_dimensions=True,
             )
 
@@ -266,10 +342,9 @@ class TabularRegressionGenerator(SyntheticGenerator):
                 )
                 continue
 
-            yc, yt, _, _ = _standardize_from_context(
+            yc, yt, _, _ = self._preprocess_pair(
                 yc_raw,
                 yt_raw,
-                epsilon=self.epsilon,
                 zero_constant_dimensions=False,
             )
 

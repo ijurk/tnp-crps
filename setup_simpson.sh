@@ -16,3 +16,9 @@ export WANDB_SILENT=true
 
 # Use one GPU for direct interactive runs on Simpson.
 export CUDA_VISIBLE_DEVICES=0
+
+export MPLCONFIGDIR=/scratch2/ij292/.cache/matplotlib
+mkdir -p "$MPLCONFIGDIR"
+# Work around Simpson /homes filesystem I/O failures.
+export GIT_CONFIG_GLOBAL=/scratch2/ij292/.git-simpson/config
+export GIT_CONFIG_NOSYSTEM=1

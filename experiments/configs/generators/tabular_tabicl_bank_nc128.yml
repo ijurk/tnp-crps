@@ -11,18 +11,23 @@ generators:
 
     dim: ${params.dim_x}
     max_input_features: ${params.dim_x}
+    preprocessing_mode: tabicl_context
+    tabicl_outlier_threshold: 4.0
+    tabicl_standardized_clip: 100.0
     epsilon: 1.0e-6
-    min_context_target_std: 1.0e-4
+    min_context_target_std: 1.0e-6
     max_abs_standardized_input: 50.0
     max_abs_standardized_target: 50.0
     max_task_attempts: 64
     permute_features: true
+    permute_rows: true
     min_nc: 128
     max_nc: 128
     min_nt: 128
     max_nt: 128
     samples_per_epoch: 16000
     batch_size: 16
+
 
   val:
     _target_: tnp_crps.data.tabular.TabularRegressionGenerator
@@ -36,12 +41,16 @@ generators:
 
     dim: ${params.dim_x}
     max_input_features: ${params.dim_x}
+    preprocessing_mode: tabicl_context
+    tabicl_outlier_threshold: 4.0
+    tabicl_standardized_clip: 100.0
     epsilon: 1.0e-6
-    min_context_target_std: 1.0e-4
+    min_context_target_std: 1.0e-6
     max_abs_standardized_input: 50.0
     max_abs_standardized_target: 50.0
     max_task_attempts: 64
     permute_features: true
+    permute_rows: true
     min_nc: 128
     max_nc: 128
     min_nt: 128
@@ -63,12 +72,16 @@ generators:
 
     dim: ${params.dim_x}
     max_input_features: ${params.dim_x}
+    preprocessing_mode: tabicl_context
+    tabicl_outlier_threshold: 4.0
+    tabicl_standardized_clip: 100.0
     epsilon: 1.0e-6
-    min_context_target_std: 1.0e-4
+    min_context_target_std: 1.0e-6
     max_abs_standardized_input: 50.0
     max_abs_standardized_target: 50.0
     max_task_attempts: 64
     permute_features: true
+    permute_rows: true
     min_nc: 128
     max_nc: 128
     min_nt: 128

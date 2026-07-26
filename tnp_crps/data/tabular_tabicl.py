@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Any, Mapping, Optional, Tuple
 
 import numpy as np
+import math
 import torch
 
 from tabicl.prior._dataset import should_filter
@@ -35,6 +36,7 @@ class TabICLGraphTaskSource:
         max_features: int = 20,
         device: str = "cpu",
         max_generation_attempts: int = 100,
+        min_full_target_std: float = 1.0e-6,
         prior_config: Optional[Mapping[str, Any]] = None,
         tabicl_commit: str = (
             "46b91961db4f8873dd049ec09990698a435e1e29"
@@ -45,6 +47,9 @@ class TabICLGraphTaskSource:
         self.device = str(device)
         self.max_generation_attempts = int(
             max_generation_attempts
+        )
+        self.min_full_target_std = float(
+            min_full_target_std
         )
         self.tabicl_commit = str(tabicl_commit)
 
@@ -69,6 +74,11 @@ class TabICLGraphTaskSource:
         if self.max_generation_attempts < 1:
             raise ValueError(
                 "max_generation_attempts must be positive."
+            )
+
+        if self.min_full_target_std <= 0.0:
+            raise ValueError(
+                "min_full_target_std must be positive."
             )
 
     def _sample_num_features(self) -> int:
@@ -199,6 +209,22 @@ class TabICLGraphTaskSource:
                 last_rejection = "y contains NaN or Inf"
                 continue
 
+            full_target_std = float(
+                y.std(unbiased=False).item()
+            )
+
+            if ((
+                not math.isfinite(full_target_std)
+                )
+                or full_target_std
+                < self.min_full_target_std
+            ):
+                last_rejection = (
+                    "full target standard deviation is too small: "
+                    f"{full_target_std:.6g}"
+                )
+                continue
+
             x, active_features = self._remove_constant_features(x)
 
             if active_features < 1:
@@ -227,6 +253,10 @@ class TabICLGraphTaskSource:
                 "seq_len": seq_len,
                 "requested_num_features": requested_features,
                 "active_num_features": active_features,
+                "full_target_std": full_target_std,
+                "min_full_target_std": (
+                    self.min_full_target_std
+                ),
                 "prior_config": repr(self.config),
                 "full_sequence_preprocessing": False,
                 "categorical_features": False,
