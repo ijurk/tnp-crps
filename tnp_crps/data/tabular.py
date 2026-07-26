@@ -106,7 +106,8 @@ class TabularRegressionGenerator(SyntheticGenerator):
         max_task_attempts: int = 32,
         max_abs_standardized_input: float = 50.0,
         max_abs_standardized_target: float = 50.0,
-        preprocessing_mode: str = "zscore",
+        x_preprocessing_mode: str = "zscore",
+        y_preprocessing_mode: str = "zscore",
         tabicl_outlier_threshold: float = 4.0,
         tabicl_standardized_clip: float = 100.0,
         permute_rows: bool = False,
@@ -124,7 +125,8 @@ class TabularRegressionGenerator(SyntheticGenerator):
         self.max_task_attempts = int(max_task_attempts)
         self.max_abs_standardized_input = float(max_abs_standardized_input)
         self.max_abs_standardized_target = float(max_abs_standardized_target)
-        self.preprocessing_mode = str(preprocessing_mode)
+        self.x_preprocessing_mode = str(x_preprocessing_mode)
+        self.y_preprocessing_mode = str(y_preprocessing_mode)
         self.tabicl_outlier_threshold = float(tabicl_outlier_threshold)
         self.tabicl_standardized_clip = float(tabicl_standardized_clip)
         self.permute_rows = bool(permute_rows)
@@ -170,14 +172,24 @@ class TabularRegressionGenerator(SyntheticGenerator):
                 "max_abs_standardized_target must be positive."
             )
 
-        if self.preprocessing_mode not in {
-            "zscore",
-            "tabicl_context",
-        }:
-            raise ValueError(
-                "preprocessing_mode must be either "
-                "'zscore' or 'tabicl_context'."
-            )
+        for name, mode in (
+            (
+                "x_preprocessing_mode",
+                self.x_preprocessing_mode,
+            ),
+            (
+                "y_preprocessing_mode",
+                self.y_preprocessing_mode,
+            ),
+        ):
+            if mode not in {
+                "zscore",
+                "tabicl_context",
+            }:
+                raise ValueError(
+                    f"{name} must be either "
+                    "'zscore' or 'tabicl_context'."
+                )
 
         if self.tabicl_outlier_threshold <= 0.0:
             raise ValueError(
@@ -194,6 +206,7 @@ class TabularRegressionGenerator(SyntheticGenerator):
         context: torch.Tensor,
         target: torch.Tensor,
         *,
+        mode: str,
         zero_constant_dimensions: bool,
     ) -> Tuple[
         torch.Tensor,
@@ -201,7 +214,7 @@ class TabularRegressionGenerator(SyntheticGenerator):
         torch.Tensor,
         torch.Tensor,
     ]:
-        if self.preprocessing_mode == "zscore":
+        if mode == "zscore":
             return _standardize_from_context(
                 context,
                 target,
@@ -321,6 +334,7 @@ class TabularRegressionGenerator(SyntheticGenerator):
             xc, xt, _, _ = self._preprocess_pair(
                 xc_raw,
                 xt_raw,
+                mode=self.x_preprocessing_mode,
                 zero_constant_dimensions=True,
             )
 
@@ -345,6 +359,7 @@ class TabularRegressionGenerator(SyntheticGenerator):
             yc, yt, _, _ = self._preprocess_pair(
                 yc_raw,
                 yt_raw,
+                mode=self.y_preprocessing_mode,
                 zero_constant_dimensions=False,
             )
 

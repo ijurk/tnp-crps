@@ -23,7 +23,8 @@ generators:
 
     dim: ${params.dim_x}
     max_input_features: ${params.dim_x}
-    preprocessing_mode: tabicl_context
+    x_preprocessing_mode: tabicl_context
+    y_preprocessing_mode: zscore
     tabicl_outlier_threshold: 4.0
     tabicl_standardized_clip: 100.0
     epsilon: 1.0e-6
@@ -64,7 +65,8 @@ generators:
 
     dim: ${params.dim_x}
     max_input_features: ${params.dim_x}
-    preprocessing_mode: tabicl_context
+    x_preprocessing_mode: tabicl_context
+    y_preprocessing_mode: zscore
     tabicl_outlier_threshold: 4.0
     tabicl_standardized_clip: 100.0
     epsilon: 1.0e-6
@@ -107,7 +109,8 @@ generators:
 
     dim: ${params.dim_x}
     max_input_features: ${params.dim_x}
-    preprocessing_mode: tabicl_context
+    x_preprocessing_mode: tabicl_context
+    y_preprocessing_mode: zscore
     tabicl_outlier_threshold: 4.0
     tabicl_standardized_clip: 100.0
     epsilon: 1.0e-6

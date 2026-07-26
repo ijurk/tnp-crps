@@ -9,7 +9,7 @@ from pathlib import Path
 import torch
 
 from tnp_crps.data.tabular_preprocessing import tabicl_preprocess_from_context
-
+from tnp_crps.data.tabular import _standardize_from_context
 
 def load_shard(path: Path) -> dict:
     try:
@@ -186,12 +186,10 @@ def main() -> None:
                 total_tasks += 1
                 continue
 
-            yc, yt, _, _ = tabicl_preprocess_from_context(
+            yc, yt, _, _ = _standardize_from_context(
                 yc_raw,
                 yt_raw,
                 epsilon=args.epsilon,
-                outlier_threshold=4.0,
-                standardized_clip=100.0,
                 zero_constant_dimensions=False,
             )
 

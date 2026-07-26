@@ -27,6 +27,8 @@ TABICL_COMMIT = (
     "46b91961db4f8873dd049ec09990698a435e1e29"
 )
 
+MIN_FULL_TARGET_STD = 1.0e-6
+
 PRIOR_CONFIG: dict[str, Any] = {
     "add_gaussian_noise": False,
     "allow_act_warping": False,
@@ -59,6 +61,7 @@ def _build_shard(job: dict[str, Any]) -> dict[str, Any]:
         max_features=int(job["max_features"]),
         device="cpu",
         max_generation_attempts=100,
+        min_full_target_std=MIN_FULL_TARGET_STD,
         prior_config=PRIOR_CONFIG,
         tabicl_commit=TABICL_COMMIT,
     )
@@ -112,6 +115,7 @@ def _build_shard(job: dict[str, Any]) -> dict[str, Any]:
         "seed": shard_seed,
         "tabicl_commit": TABICL_COMMIT,
         "prior_config": PRIOR_CONFIG,
+        "min_full_target_std": MIN_FULL_TARGET_STD,
         "full_sequence_preprocessing": False,
         "categorical_features": False,
     }
@@ -248,6 +252,7 @@ def main() -> None:
         "seed": args.seed,
         "tabicl_commit": TABICL_COMMIT,
         "prior_config": PRIOR_CONFIG,
+        "min_full_target_std": MIN_FULL_TARGET_STD,
         "full_sequence_preprocessing": False,
         "categorical_features": False,
     }
