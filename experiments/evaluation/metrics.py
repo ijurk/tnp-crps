@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 import pandas as pd
 import torch
@@ -140,6 +140,233 @@ def energy_score_per_task(
         scores.append(sample_to_target - 0.5 * pairwise_fair)
 
     return torch.stack(scores)
+
+
+def per_task_metric_rows_tabular(
+    *,
+    samples: torch.Tensor,
+    target: torch.Tensor,
+    num_context: int,
+    model_name: str,
+    checkpoint_path: str,
+    eval_set: str,
+    task_index_start: int,
+    alpha: float = 1.0,
+    interval_levels: Iterable[float] = DEFAULT_INTERVAL_LEVELS,
+) -> List[Dict[str, Any]]:
+    """Compute one metric row per tabular task.
+
+    Args:
+        samples:
+            Predictive samples with shape [M, B, Nt, Dy].
+        target:
+            Targets with shape [B, Nt, Dy].
+        task_index_start:
+            Index assigned to the first task in this batch. The evaluator
+            resets this to zero for every model/evaluation-set pair, allowing
+            paired comparisons across models.
+
+    Returns:
+        One row per task.
+    """
+    if samples.ndim != target.ndim + 1:
+        raise ValueError(
+            "Expected samples [M, B, Nt, Dy] and target [B, Nt, Dy]. "
+            f"Got samples={samples.shape}, target={target.shape}."
+        )
+
+    if samples.shape[1:] != target.shape:
+        raise ValueError(
+            "Expected samples.shape[1:] == target.shape. "
+            f"Got samples={samples.shape}, target={target.shape}."
+        )
+
+    if not 0.0 <= alpha <= 1.0:
+        raise ValueError(
+            f"alpha must be in [0, 1]. Got {alpha}."
+        )
+
+    samples = samples.detach()
+    target = target.detach()
+
+    num_samples = int(samples.shape[0])
+    batch_size = int(target.shape[0])
+    num_targets = int(target.shape[1])
+    output_dim = int(target.shape[2])
+    num_target_elements = num_targets * output_dim
+
+    if num_samples < 2:
+        raise ValueError(
+            "Task-level probabilistic metrics require at least "
+            "two predictive samples."
+        )
+
+    pred_mean = samples.mean(dim=0)
+
+    squared_error = (
+        pred_mean - target
+    ).pow(2).reshape(batch_size, -1)
+
+    task_rmse = squared_error.mean(dim=1).sqrt()
+
+    crps = crps_per_element(
+        samples=samples,
+        target=target,
+        alpha=alpha,
+    ).reshape(batch_size, -1)
+
+    task_crps = crps.mean(dim=1)
+
+    sample_var = samples.var(
+        dim=0,
+        unbiased=True,
+    ).reshape(batch_size, -1)
+
+    task_spread = sample_var.mean(dim=1).sqrt()
+
+    pairwise_dist = torch.abs(
+        samples[:, None, ...]
+        - samples[None, :, ...]
+    )
+
+    offdiag_diversity = (
+        pairwise_dist.sum(dim=(0, 1))
+        / (
+            num_samples
+            * (num_samples - 1)
+        )
+    ).reshape(batch_size, -1)
+
+    task_diversity = offdiag_diversity.mean(dim=1)
+
+    task_energy = energy_score_per_task(
+        samples=samples,
+        target=target,
+        mask=None,
+    )
+
+    finite_m_correction = math.sqrt(
+        (num_samples + 1.0)
+        / num_samples
+    )
+
+    task_spread_skill = (
+        finite_m_correction
+        * task_spread
+        / (task_rmse + 1.0e-12)
+    )
+
+    interval_metrics: Dict[
+        str,
+        tuple[torch.Tensor, torch.Tensor],
+    ] = {}
+
+    for level in interval_levels:
+        suffix = level_suffix(level)
+
+        lower_q = (1.0 - level) / 2.0
+        upper_q = 1.0 - lower_q
+
+        lower = torch.quantile(
+            samples,
+            lower_q,
+            dim=0,
+        )
+        upper = torch.quantile(
+            samples,
+            upper_q,
+            dim=0,
+        )
+
+        covered = (
+            (target >= lower)
+            & (target <= upper)
+        ).to(target.dtype)
+
+        width = upper - lower
+
+        task_coverage = covered.reshape(
+            batch_size,
+            -1,
+        ).mean(dim=1)
+
+        task_width = width.reshape(
+            batch_size,
+            -1,
+        ).mean(dim=1)
+
+        interval_metrics[suffix] = (
+            task_coverage,
+            task_width,
+        )
+
+    rows: List[Dict[str, Any]] = []
+
+    exact_bucket = (
+        f"nc_{int(num_context):03d}"
+    )
+
+    for local_index in range(batch_size):
+        row: Dict[str, Any] = {
+            "model_name": model_name,
+            "checkpoint_path": checkpoint_path,
+            "eval_set": eval_set,
+            "region": "all",
+            "context_bucket": exact_bucket,
+            "task_index": (
+                int(task_index_start)
+                + local_index
+            ),
+            "num_context": int(num_context),
+            "num_targets": num_targets,
+            "output_dim": output_dim,
+            "num_target_elements": (
+                num_target_elements
+            ),
+            "num_eval_samples": num_samples,
+            "rmse": float(
+                task_rmse[local_index].item()
+            ),
+            "crps": float(
+                task_crps[local_index].item()
+            ),
+            "energy_score": float(
+                task_energy[local_index].item()
+            ),
+            "ensemble_spread": float(
+                task_spread[local_index].item()
+            ),
+            "spread_skill_ratio": float(
+                task_spread_skill[
+                    local_index
+                ].item()
+            ),
+            "sample_diversity_offdiag": float(
+                task_diversity[
+                    local_index
+                ].item()
+            ),
+        }
+
+        for suffix, (
+            task_coverage,
+            task_width,
+        ) in interval_metrics.items():
+            row[f"coverage_{suffix}"] = float(
+                task_coverage[
+                    local_index
+                ].item()
+            )
+            row[f"width_{suffix}"] = float(
+                task_width[
+                    local_index
+                ].item()
+            )
+
+        rows.append(row)
+
+    return rows
+
 
 def metric_sums_for_mask(
     samples: torch.Tensor,

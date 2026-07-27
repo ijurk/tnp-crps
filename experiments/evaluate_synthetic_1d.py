@@ -5,7 +5,7 @@ import dataclasses
 import json
 import math
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import hiyapyco
 import lightning.pytorch as pl
@@ -19,7 +19,12 @@ from tnp.utils.experiment_utils import deep_convert_dict, extract_config
 from tnp_crps.models.tnp_crps import DirectTNP
 from tnp_crps.utils.np_functions import np_pred_fn
 
-from evaluation.metrics import batch_metric_rows, batch_metric_rows_tabular, finalise_metric_rows
+from evaluation.metrics import (
+    batch_metric_rows,
+    batch_metric_rows_tabular,
+    finalise_metric_rows,
+    per_task_metric_rows_tabular,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -374,7 +379,7 @@ def evaluate_one_model_on_one_set(
     evaluation_kind: str,
     metric_alpha: float,
     sampling_seed: int,
-) -> List[Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     model_name = model_entry["name"]
     entry_kind = str(model_entry.get("kind", "model"))
     model_overrides = list(model_entry.get("overrides", []) or [])
@@ -505,6 +510,8 @@ def evaluate_one_model_on_one_set(
     pl.seed_everything(resolved_sampling_seed)
 
     rows: List[Dict[str, Any]] = []
+    per_task_rows: List[Dict[str, Any]] = []
+    task_index_start = 0
 
     for batch_idx, batch in enumerate(loader):
         if max_batches is not None and batch_idx >= max_batches:
@@ -545,6 +552,23 @@ def evaluate_one_model_on_one_set(
                 alpha=resolved_metric_alpha,
             )
 
+            batch_per_task_rows = (
+                per_task_metric_rows_tabular(
+                    samples=samples,
+                    target=batch.yt,
+                    num_context=batch.xc.shape[1],
+                    model_name=model_name,
+                    checkpoint_path=checkpoint_path,
+                    eval_set=eval_name,
+                    task_index_start=task_index_start,
+                    alpha=resolved_metric_alpha,
+                )
+            )
+
+            task_index_start += int(
+                batch.yt.shape[0]
+            )
+
         else:
             assert context_range is not None
 
@@ -560,11 +584,18 @@ def evaluate_one_model_on_one_set(
                 alpha=resolved_metric_alpha,
             )
 
+            batch_per_task_rows = []
+
         for metric_row in batch_rows:
             metric_row["training_alpha"] = training_alpha
             metric_row["metric_alpha"] = resolved_metric_alpha
 
+        for task_row in batch_per_task_rows:
+            task_row["training_alpha"] = training_alpha
+            task_row["metric_alpha"] = resolved_metric_alpha
+
         rows.extend(batch_rows)
+        per_task_rows.extend(batch_per_task_rows)
 
         if batch_idx % 25 == 0:
             print(
@@ -572,7 +603,7 @@ def evaluate_one_model_on_one_set(
                 f"{batch_idx + 1}/{generator.num_batches}"
             )
 
-    return rows
+    return rows, per_task_rows
 
 
 def main() -> None:
@@ -638,23 +669,27 @@ def main() -> None:
         json.dump(eval_config, f, indent=2)
 
     all_rows: List[Dict[str, Any]] = []
+    all_per_task_rows: List[Dict[str, Any]] = []
 
     for model_entry in eval_config["models"]:
         for eval_set in eval_config["eval_sets"]:
-            rows = evaluate_one_model_on_one_set(
-                model_entry=model_entry,
-                eval_set=eval_set,
-                base_generator_config=eval_config["base_generator_config"],
-                num_eval_samples=num_eval_samples,
-                samples_per_eval_set=samples_per_eval_set,
-                eval_batch_size=eval_batch_size,
-                max_batches=max_batches,
-                device=device,
-                evaluation_kind=evaluation_kind,
-                metric_alpha=metric_alpha,
-                sampling_seed=sampling_seed,
+            rows, per_task_rows = (
+                evaluate_one_model_on_one_set(
+                    model_entry=model_entry,
+                    eval_set=eval_set,
+                    base_generator_config=eval_config["base_generator_config"],
+                    num_eval_samples=num_eval_samples,
+                    samples_per_eval_set=samples_per_eval_set,
+                    eval_batch_size=eval_batch_size,
+                    max_batches=max_batches,
+                    device=device,
+                    evaluation_kind=evaluation_kind,
+                    metric_alpha=metric_alpha,
+                    sampling_seed=sampling_seed,
+                )
             )
             all_rows.extend(rows)
+            all_per_task_rows.extend(per_task_rows)
 
             raw_so_far = pd.DataFrame(all_rows)
             raw_so_far.to_csv(
@@ -668,6 +703,12 @@ def main() -> None:
                 index=False,
             )
 
+            if all_per_task_rows:
+                pd.DataFrame(all_per_task_rows).to_csv(
+                    os.path.join(output_dir, "per_task_metrics_partial.csv"),
+                    index=False,
+                )
+
     raw = pd.DataFrame(all_rows)
     raw_path = os.path.join(output_dir, "raw_metric_sums.csv")
     raw.to_csv(raw_path, index=False)
@@ -676,8 +717,16 @@ def main() -> None:
     metrics_path = os.path.join(output_dir, "metrics.csv")
     final.to_csv(metrics_path, index=False)
 
+    per_task_path = None
+
+    if all_per_task_rows:
+        per_task_path = os.path.join(output_dir,"per_task_metrics.csv")
+        pd.DataFrame(all_per_task_rows).to_csv(per_task_path,index=False)
+
     print(f"Wrote raw metric sums to: {raw_path}")
     print(f"Wrote final metrics to:   {metrics_path}")
+    if per_task_path is not None:
+        print(f"Wrote per-task metrics to: {per_task_path}")
 
     display_cols = [
         "model_name",
