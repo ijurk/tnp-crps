@@ -322,6 +322,15 @@ class TabularRegressionGenerator(SyntheticGenerator):
                 f"nc={nc}, nt={nt}."
             )
 
+        if (source_seq_len > total and not self.permute_rows):
+            raise ValueError(
+                "Selecting a subset from a fixed-length raw task "
+                "requires permute_rows=True. Otherwise the wrapper "
+                "would repeatedly use the same row prefix. "
+                f"source_seq_len={source_seq_len}, "
+                f"requested={total}."
+            )
+
         last_rejection = "unknown"
 
         for _ in range(self.max_task_attempts):
