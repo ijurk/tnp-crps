@@ -1,0 +1,38 @@
+output_dir: results/synthetic_1d/sawtooth_context_curriculum_ar_4096_v1
+device: cuda
+base_generator_config: experiments/configs/generators/sawtooth_1d_interpolation_curriculum.yml
+models:
+- name: Gaussian curriculum
+  model_config: experiments/configs/models/tnp_fourier.yml
+  checkpoint_path: checkpoints/sawtooth_context_curriculum/synthetic-1d-sawtooth-interpolation/sawtooth-gaussian-fourier-context-curriculum/sawtooth-gaussian-fourier-context-curriculum-seed1-v1/epoch=0499.ckpt
+  overrides: []
+- name: Dropout curriculum
+  model_config: experiments/configs/models/tnp_crps_dropout_fourier.yml
+  checkpoint_path: checkpoints/sawtooth_context_curriculum/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-context-curriculum/sawtooth-dropout-fourier-context-curriculum-seed1-v1/epoch=0499.ckpt
+  overrides:
+  - params.num_samples=4
+  - params.p_dropout=0.10
+  - params.crps_alpha=1.0
+  - model.use_mc_dropout=true
+- name: StochLN curriculum
+  model_config: experiments/configs/models/tnp_crps_stochln_fourier.yml
+  checkpoint_path: checkpoints/sawtooth_context_curriculum/synthetic-1d-sawtooth-interpolation/sawtooth-stochln-fourier-context-curriculum/sawtooth-stochln-fourier-context-curriculum-seed1-v1/epoch=0499.ckpt
+  overrides:
+  - params.num_samples=4
+  - params.crps_alpha=1.0
+  - params.layernorm_noise_dim=32
+evaluation_mode: ar_anchors
+num_tasks: 4096
+num_ar_samples: 50
+eval_batch_size: 8
+eval_nc: 48
+num_ar_anchors: 16
+training_max_nc: 64
+ar_anchor_range:
+- -2.0
+- 2.0
+anchor_placement: uniform_random
+target_order: random
+stochln_noise_mode: refresh
+seed: 20260720
+anchor_seed: 20260720
