@@ -98,6 +98,22 @@ class TabICLDiskTaskSource:
                 f"No shard_*.pt files found in {self.split_dir}."
             )
 
+        # Read the sequence length from the first shard so callers can
+        # request the complete stored task before selecting Nc + Nt rows.
+        first_payload = _load_shard(
+            self.shard_paths[0]
+        )
+
+        self._seq_len = int(
+            first_payload["seq_len"]
+        )
+
+        if self._seq_len < 1:
+            raise ValueError(
+                "Stored task sequence length must be positive, "
+                f"got {self._seq_len}."
+            )
+
         self._worker_id: Optional[int] = None
         self._rng: Optional[random.Random] = None
         self._shard_order: list[int] = []
@@ -108,6 +124,11 @@ class TabICLDiskTaskSource:
         self._task_order: list[int] = []
         self._task_cursor = 0
         self._cycle_index = 0
+
+    @property
+    def seq_len(self) -> int:
+        """Number of rows stored in each raw bank task."""
+        return self._seq_len
 
     def _initialise_worker_state(self) -> None:
         worker_info = get_worker_info()

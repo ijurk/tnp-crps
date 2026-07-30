@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional, Protocol, Tuple
+from typing import Any, Optional, Protocol, Sequence, Tuple
 
 import torch
 import math
@@ -87,8 +87,9 @@ class TabularRegressionGenerator(SyntheticGenerator):
 
     Processing order:
 
-        sample raw task
-        -> optionally permute rows
+        sample complete raw task
+        -> optionally permute all source rows
+        -> retain nc + nt rows
         -> split context and targets
         -> fit x and y transforms on context only
         -> apply transforms to both sets
@@ -100,6 +101,7 @@ class TabularRegressionGenerator(SyntheticGenerator):
         self,
         *,
         source: TabularTaskSource,
+        context_sizes: Optional[Sequence[int]] = None,
         max_input_features: int = 20,
         epsilon: float = 1.0e-6,
         min_context_target_std: float = 1.0e-4,
@@ -117,6 +119,45 @@ class TabularRegressionGenerator(SyntheticGenerator):
         super().__init__(**kwargs)
 
         self.source = source
+
+        self.context_sizes: Optional[torch.Tensor] = None
+
+        if context_sizes is not None:
+            resolved_context_sizes = tuple(int(value) for value in context_sizes)
+
+            if len(resolved_context_sizes) == 0:
+                raise ValueError(
+                    "context_sizes must be non-empty "
+                    "when provided."
+                )
+
+            if any(value < 1 for value in resolved_context_sizes):
+                raise ValueError(
+                    "All context_sizes must be positive. "
+                    f"Got {resolved_context_sizes}."
+                )
+
+            if (len(set(resolved_context_sizes)) != len(resolved_context_sizes)):
+                raise ValueError(
+                    "context_sizes must not contain "
+                    "duplicates. "
+                    f"Got {resolved_context_sizes}."
+                )
+
+            configured_min_nc = int(self.min_nc.item())
+            configured_max_nc = int(self.max_nc.item())
+
+            if (min(resolved_context_sizes) < configured_min_nc or max(resolved_context_sizes) > configured_max_nc):
+                raise ValueError(
+                    "Every discrete context size must lie "
+                    "within [min_nc, max_nc]. "
+                    f"context_sizes={resolved_context_sizes}, "
+                    f"range=[{configured_min_nc},"
+                    f"{configured_max_nc}]."
+                )
+
+            self.context_sizes = torch.tensor(resolved_context_sizes, dtype=torch.long)
+
         self.max_input_features = int(max_input_features)
         self.epsilon = float(epsilon)
         self.min_context_target_std = float(
@@ -201,6 +242,26 @@ class TabularRegressionGenerator(SyntheticGenerator):
                 "tabicl_standardized_clip must be positive."
             )
 
+    def generate_batch(self) -> SyntheticBatch:
+        """Generate a batch with optional discrete Nc sampling.
+
+        When context_sizes is provided, one of those sizes is
+        sampled uniformly for the complete batch. Otherwise,
+        the standard contiguous [min_nc, max_nc] sampling from
+        SyntheticGenerator is retained.
+        """
+        if self.context_sizes is None:
+            return super().generate_batch()
+
+        context_index = torch.randint(low=0, high=int(self.context_sizes.numel()), size=())
+
+        nc = int(self.context_sizes[context_index].item())
+
+        nt = int(torch.randint(low=self.min_nt, high=self.max_nt + 1, size=()).item())
+
+        return self.sample_batch(nc=nc, nt=nt, batch_shape=torch.Size((self.batch_size,)))
+
+
     def _preprocess_pair(
         self,
         context: torch.Tensor,
@@ -246,10 +307,29 @@ class TabularRegressionGenerator(SyntheticGenerator):
         nt: int,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         total = nc + nt
+
+        # Disk-backed tasks are stored at a fixed raw sequence length.
+        # Dynamic sources without a seq_len attribute continue to use
+        # exactly nc + nt rows, preserving their existing behaviour.
+        source_seq_len = int(getattr(self.source, "seq_len", total))
+
+        if source_seq_len < total:
+            raise ValueError(
+                "Source task is shorter than the requested "
+                "context-plus-target set: "
+                f"source_seq_len={source_seq_len}, "
+                f"requested={total}, "
+                f"nc={nc}, nt={nt}."
+            )
+
         last_rejection = "unknown"
 
         for _ in range(self.max_task_attempts):
-            x_raw, y_raw, _ = self.source.sample_task(total)
+            # Load the complete stored task. For the current TabICL
+            # bank this is 256 rows, irrespective of the sampled Nc.
+            x_raw, y_raw, _ = self.source.sample_task(
+                source_seq_len
+            )
 
             x_raw = (
                 x_raw.detach()
@@ -275,12 +355,15 @@ class TabularRegressionGenerator(SyntheticGenerator):
                 )
                 continue
 
-            if x_raw.shape[0] != total or y_raw.shape[0] != total:
+            if (
+                x_raw.shape[0] != source_seq_len
+                or y_raw.shape[0] != source_seq_len
+            ):
                 last_rejection = (
-                    "incorrect sequence length: "
+                    "incorrect source sequence length: "
                     f"x={tuple(x_raw.shape)}, "
                     f"y={tuple(y_raw.shape)}, "
-                    f"expected {total}"
+                    f"expected {source_seq_len}"
                 )
                 continue
 
@@ -301,19 +384,28 @@ class TabularRegressionGenerator(SyntheticGenerator):
                 last_rejection = "y contains NaN or Inf"
                 continue
 
+            # Randomise the complete 256-row task before selecting the
+            # rows used by this context-size draw. This samples rows
+            # without replacement and avoids always using a fixed prefix.
             if self.permute_rows:
                 row_permutation = torch.randperm(
-                    total,
+                    source_seq_len,
                     device=x_raw.device,
                 )
                 x_raw = x_raw[row_permutation]
                 y_raw = y_raw[row_permutation]
+
+            # Retain exactly Nc context rows and Nt target rows.
+            # Any unused rows from the stored task are discarded.
+            x_raw = x_raw[:total]
+            y_raw = y_raw[:total]
 
             xc_raw = x_raw[:nc]
             xt_raw = x_raw[nc:]
 
             yc_raw = y_raw[:nc]
             yt_raw = y_raw[nc:]
+
 
             context_target_std = yc_raw.std(
                 dim=0,
