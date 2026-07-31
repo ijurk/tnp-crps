@@ -24,6 +24,7 @@ from evaluation.metrics import (
     batch_metric_rows_tabular,
     finalise_metric_rows,
     per_task_metric_rows_tabular,
+    per_task_shape_rows_tabular,
 )
 
 
@@ -176,6 +177,115 @@ def sample_model(
         num_samples=num_eval_samples,
     )
     return pred_dist.sample((num_eval_samples,))
+
+
+@torch.no_grad()
+def sample_model_for_shape_analysis(
+    *,
+    model: torch.nn.Module,
+    batch: Batch,
+    num_eval_samples: int,
+    sample_chunk_size: int,
+) -> Tuple[
+    torch.Tensor,
+    Optional[torch.Tensor],
+    Optional[torch.Tensor],
+]:
+    """Generate samples and retain exact Gaussian parameters when available.
+
+    Returns:
+        samples:
+            [M, B, Nt, Dy].
+        gaussian_loc:
+            [B, Nt, Dy] for the Gaussian TNP, otherwise None.
+        gaussian_scale:
+            [B, Nt, Dy] for the Gaussian TNP, otherwise None.
+    """
+    num_eval_samples = int(
+        num_eval_samples
+    )
+    sample_chunk_size = int(
+        sample_chunk_size
+    )
+
+    if num_eval_samples < 2:
+        raise ValueError(
+            "Shape analysis requires at least two samples."
+        )
+
+    if sample_chunk_size < 1:
+        raise ValueError(
+            "sample_chunk_size must be positive."
+        )
+
+    if isinstance(
+        model,
+        DirectTNP,
+    ):
+        chunks = []
+        remaining = (
+            num_eval_samples
+        )
+
+        while remaining > 0:
+            chunk_size = min(
+                sample_chunk_size,
+                remaining,
+            )
+
+            chunk = model.sample(
+                xc=batch.xc,
+                yc=batch.yc,
+                xt=batch.xt,
+                num_samples=chunk_size,
+            )
+
+            chunks.append(
+                chunk
+            )
+
+            remaining -= (
+                chunk_size
+            )
+
+        return (
+            torch.cat(
+                chunks,
+                dim=0,
+            ),
+            None,
+            None,
+        )
+
+    pred_dist = np_pred_fn(
+        model=model,
+        batch=batch,
+        num_samples=(
+            num_eval_samples
+        ),
+    )
+
+    if not isinstance(
+        pred_dist,
+        torch.distributions.Normal,
+    ):
+        raise TypeError(
+            "Analytic Gaussian shape analysis requires a "
+            "torch.distributions.Normal prediction. "
+            f"Got {type(pred_dist)}."
+        )
+
+    samples = pred_dist.sample(
+        (
+            num_eval_samples,
+        )
+    )
+
+    return (
+        samples,
+        pred_dist.loc,
+        pred_dist.scale,
+    )
 
 
 @torch.no_grad()
@@ -379,6 +489,7 @@ def evaluate_one_model_on_one_set(
     evaluation_kind: str,
     metric_alpha: float,
     sampling_seed: int,
+    shape_analysis: Optional[Dict[str, Any]] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     model_name = model_entry["name"]
     entry_kind = str(model_entry.get("kind", "model"))
@@ -492,18 +603,56 @@ def evaluate_one_model_on_one_set(
             "Expected 'synthetic_1d' or 'tabular'."
         )
 
-    resolved_sampling_seed = int(
-        eval_set.get("sampling_seed", sampling_seed)
-    )
-    resolved_metric_alpha = float(
-        eval_set.get("metric_alpha", metric_alpha)
-    )
+    resolved_sampling_seed = int(eval_set.get("sampling_seed", sampling_seed))
+    resolved_metric_alpha = float(eval_set.get("metric_alpha", metric_alpha))
 
     if not 0.0 <= resolved_metric_alpha <= 1.0:
         raise ValueError(
             "Resolved metric_alpha must be in [0, 1]. "
             f"Got {resolved_metric_alpha} for eval_set={eval_name}."
         )
+
+    shape_cfg = (
+        shape_analysis
+        if shape_analysis is not None
+        else {}
+    )
+
+    shape_enabled = bool(shape_cfg.get("enabled",False))
+
+    if (shape_enabled and evaluation_kind != "tabular"):
+        raise ValueError(
+            "Shape analysis is currently supported only "
+            "for tabular evaluation."
+        )
+
+    headline_num_samples = int(shape_cfg.get("headline_num_samples", num_eval_samples))
+
+    shape_sample_counts = [
+        int(value)
+        for value in shape_cfg.get(
+            "sample_counts",
+            [
+                headline_num_samples
+            ],
+        )
+    ]
+
+    rank_sample_count = int(shape_cfg.get("rank_sample_count", headline_num_samples))
+
+    sample_chunk_size = int(shape_cfg.get("sample_chunk_size", headline_num_samples))
+
+    generated_num_samples = (
+        max(
+            [
+                headline_num_samples,
+                rank_sample_count,
+                *shape_sample_counts,
+            ]
+        )
+        if shape_enabled
+        else num_eval_samples
+    )
 
     # Reset after model construction so predictive Monte Carlo randomness is
     # not affected by architecture-specific parameter initialization.
@@ -519,14 +668,34 @@ def evaluate_one_model_on_one_set(
 
         batch = move_batch_to_device(batch, device)
 
+        gaussian_loc = None
+        gaussian_scale = None
+
         if is_learned_model:
             assert model is not None
 
-            samples = sample_model(
-                model=model,
-                batch=batch,
-                num_eval_samples=num_eval_samples,
-            )
+            if shape_enabled:
+                (
+                    samples,
+                    gaussian_loc,
+                    gaussian_scale,
+                ) = (
+                    sample_model_for_shape_analysis(
+                        model=model,
+                        batch=batch,
+                        num_eval_samples=(
+                            generated_num_samples
+                        ),
+                        sample_chunk_size=(
+                            sample_chunk_size
+                        ),
+                    )
+                )
+
+                metric_samples = samples[:headline_num_samples]
+            else:
+                samples = sample_model(model=model, batch=batch, num_eval_samples=(num_eval_samples))
+                metric_samples = (samples)
 
         else:
             if evaluation_kind != "tabular":
@@ -540,10 +709,11 @@ def evaluate_one_model_on_one_set(
                 batch=batch,
                 num_eval_samples=num_eval_samples,
             )
+            metric_samples = samples
 
         if evaluation_kind == "tabular":
             batch_rows = batch_metric_rows_tabular(
-                samples=samples,
+                samples=metric_samples,
                 target=batch.yt,
                 num_context=batch.xc.shape[1],
                 model_name=model_name,
@@ -554,7 +724,7 @@ def evaluate_one_model_on_one_set(
 
             batch_per_task_rows = (
                 per_task_metric_rows_tabular(
-                    samples=samples,
+                    samples=metric_samples,
                     target=batch.yt,
                     num_context=batch.xc.shape[1],
                     model_name=model_name,
@@ -565,15 +735,65 @@ def evaluate_one_model_on_one_set(
                 )
             )
 
-            task_index_start += int(
-                batch.yt.shape[0]
-            )
+            if (shape_enabled and is_learned_model):
+                shape_rows = (
+                    per_task_shape_rows_tabular(
+                        samples=samples,
+                        target=batch.yt,
+                        num_context=(
+                            batch.xc.shape[1]
+                        ),
+                        model_name=(
+                            model_name
+                        ),
+                        checkpoint_path=(
+                            checkpoint_path
+                        ),
+                        eval_set=(
+                            eval_name
+                        ),
+                        task_index_start=(
+                            task_index_start
+                        ),
+                        sample_counts=(
+                            shape_sample_counts
+                        ),
+                        rank_sample_count=(
+                            rank_sample_count
+                        ),
+                        gaussian_loc=(
+                            gaussian_loc
+                        ),
+                        gaussian_scale=(
+                            gaussian_scale
+                        ),
+                    )
+                )
+
+                if len(shape_rows) != len(batch_per_task_rows):
+                    raise RuntimeError(
+                        "Shape-analysis and standard per-task row "
+                        "counts do not match."
+                    )
+
+                for (standard_row,shape_row) in zip(batch_per_task_rows, shape_rows):
+                    if (standard_row["task_index"] != shape_row["task_index"]):
+                        raise RuntimeError(
+                            "Shape-analysis task indices do not "
+                            "match standard metric task indices."
+                        )
+
+                    for (key,value) in shape_row.items():
+                        if key not in standard_row:
+                            standard_row[key] = value
+
+            task_index_start += int(batch.yt.shape[0])
 
         else:
             assert context_range is not None
 
             batch_rows = batch_metric_rows(
-                samples=samples,
+                samples=metric_samples,
                 target=batch.yt,
                 xt=batch.xt,
                 num_context=batch.xc.shape[1],
@@ -615,7 +835,15 @@ def main() -> None:
     )
 
     output_dir = args.output_dir or eval_config["output_dir"]
-    num_eval_samples = args.num_eval_samples or int(eval_config["num_eval_samples"])
+    num_eval_samples = (
+        args.num_eval_samples
+        if args.num_eval_samples is not None
+        else int(
+            eval_config["num_eval_samples"]
+        )
+    )
+
+    shape_analysis_cfg = (eval_config.get("shape_analysis",{}) or {})
 
     samples_per_eval_set = (
         args.samples_per_eval_set
@@ -650,18 +878,14 @@ def main() -> None:
 
     # Every source is evaluated with the same scoring rule, independently of
     # the objective or alpha value used during training.
-    metric_alpha = float(
-        eval_config.get("metric_alpha", 1.0)
-    )
+    metric_alpha = float(eval_config.get("metric_alpha", 1.0))
 
     if not 0.0 <= metric_alpha <= 1.0:
         raise ValueError(
             f"metric_alpha must be in [0, 1], got {metric_alpha}."
         )
 
-    sampling_seed = int(
-        eval_config.get("sampling_seed", 20260724)
-    )
+    sampling_seed = int(eval_config.get("sampling_seed", 20260724))
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -686,6 +910,7 @@ def main() -> None:
                     evaluation_kind=evaluation_kind,
                     metric_alpha=metric_alpha,
                     sampling_seed=sampling_seed,
+                    shape_analysis=shape_analysis_cfg,
                 )
             )
             all_rows.extend(rows)

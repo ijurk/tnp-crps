@@ -85,6 +85,193 @@ def crps_per_element(
 
     return target_term - 0.5 * combined_pairwise
 
+def crps_per_element_sorted(
+    samples: torch.Tensor,
+    target: torch.Tensor,
+    alpha: float = 1.0,
+) -> torch.Tensor:
+    """Almost-fair marginal CRPS without an M x M pairwise tensor.
+
+    Args:
+        samples:
+            Predictive samples with shape [M, B, Nt, Dy].
+        target:
+            Targets with shape [B, Nt, Dy].
+        alpha:
+            1.0 gives fair CRPS and 0.0 gives ordinary empirical CRPS.
+
+    Returns:
+        Per-element CRPS with shape [B, Nt, Dy].
+    """
+    if samples.ndim != target.ndim + 1:
+        raise ValueError(
+            "Expected samples [M, ...] and target [...]. "
+            f"Got samples={samples.shape}, target={target.shape}."
+        )
+
+    if samples.shape[1:] != target.shape:
+        raise ValueError(
+            "Expected samples.shape[1:] == target.shape. "
+            f"Got samples={samples.shape}, target={target.shape}."
+        )
+
+    if not 0.0 <= alpha <= 1.0:
+        raise ValueError(
+            f"alpha must be in [0, 1]. Got {alpha}."
+        )
+
+    num_samples = int(samples.shape[0])
+
+    if num_samples < 2:
+        raise ValueError(
+            "CRPS evaluation requires at least two samples."
+        )
+
+    sorted_samples = samples.sort(
+        dim=0,
+    ).values
+
+    coefficients = torch.arange(
+        1,
+        num_samples + 1,
+        device=samples.device,
+        dtype=samples.dtype,
+    )
+
+    coefficients = (
+        2.0 * coefficients
+        - float(num_samples)
+        - 1.0
+    ).reshape(
+        num_samples,
+        *([1] * (samples.ndim - 1)),
+    )
+
+    weighted_order_sum = (
+        coefficients * sorted_samples
+    ).sum(dim=0)
+
+    target_term = torch.abs(
+        samples - target.unsqueeze(0)
+    ).mean(dim=0)
+
+    pairwise_weight = (
+        float(alpha)
+        / (
+            num_samples
+            * (num_samples - 1)
+        )
+        + (
+            1.0 - float(alpha)
+        )
+        / (
+            num_samples
+            * num_samples
+        )
+    )
+
+    return (
+        target_term
+        - pairwise_weight * weighted_order_sum
+    )
+
+
+def gaussian_crps_per_element(
+    *,
+    loc: torch.Tensor,
+    scale: torch.Tensor,
+    target: torch.Tensor,
+    epsilon: float = 1.0e-8,
+) -> torch.Tensor:
+    """Closed-form CRPS for a univariate Gaussian prediction."""
+    if loc.shape != target.shape:
+        raise ValueError(
+            "Gaussian location and target shapes must match. "
+            f"Got loc={loc.shape}, target={target.shape}."
+        )
+
+    if scale.shape != target.shape:
+        raise ValueError(
+            "Gaussian scale and target shapes must match. "
+            f"Got scale={scale.shape}, target={target.shape}."
+        )
+
+    safe_scale = scale.clamp_min(float(epsilon))
+
+    z = (target - loc) / safe_scale
+
+    sqrt_two = math.sqrt(2.0)
+    sqrt_pi = math.sqrt(math.pi)
+    sqrt_two_pi = math.sqrt(2.0 * math.pi)
+
+    cdf = 0.5 * (1.0 + torch.erf(z / sqrt_two))
+
+    pdf = torch.exp(-0.5 * z.square()) / sqrt_two_pi
+
+    return safe_scale * (
+        z * (
+            2.0 * cdf - 1.0
+        )
+        + 2.0 * pdf
+        - 1.0 / sqrt_pi
+    )
+
+
+def verification_rank_counts_per_task(
+    *,
+    samples: torch.Tensor,
+    target: torch.Tensor,
+) -> torch.Tensor:
+    """Return one verification-rank histogram per task.
+
+    Args:
+        samples:
+            Predictive samples with shape [M, B, Nt, Dy].
+        target:
+            Targets with shape [B, Nt, Dy].
+
+    Returns:
+        Integer tensor with shape [B, M + 1].
+    """
+    if samples.shape[1:] != target.shape:
+        raise ValueError(
+            "Expected samples.shape[1:] == target.shape. "
+            f"Got samples={samples.shape}, target={target.shape}."
+        )
+
+    num_samples = int(
+        samples.shape[0]
+    )
+
+    ranks = (
+        samples
+        <= target.unsqueeze(0)
+    ).sum(dim=0).long()
+
+    counts = []
+
+    for task_index in range(
+        target.shape[0]
+    ):
+        task_counts = torch.bincount(
+            ranks[
+                task_index
+            ].reshape(-1),
+            minlength=(
+                num_samples + 1
+            ),
+        )
+
+        counts.append(
+            task_counts
+        )
+
+    return torch.stack(
+        counts,
+        dim=0,
+    )
+
+
 def energy_score_per_task(
     samples: torch.Tensor,
     target: torch.Tensor,
@@ -364,6 +551,312 @@ def per_task_metric_rows_tabular(
             )
 
         rows.append(row)
+
+    return rows
+
+
+def per_task_shape_rows_tabular(
+    *,
+    samples: torch.Tensor,
+    target: torch.Tensor,
+    num_context: int,
+    model_name: str,
+    checkpoint_path: str,
+    eval_set: str,
+    task_index_start: int,
+    sample_counts: Iterable[int],
+    rank_sample_count: int,
+    gaussian_loc: Optional[
+        torch.Tensor
+    ] = None,
+    gaussian_scale: Optional[
+        torch.Tensor
+    ] = None,
+) -> List[Dict[str, Any]]:
+    """Compute per-task predictive-shape diagnostics.
+
+    The empirical CRPS is calculated with the efficient sorted
+    implementation. Moment-matched Gaussian variances use correction=0,
+    matching the first two moments of the empirical ensemble.
+    """
+    samples = samples.detach()
+    target = target.detach()
+
+    if samples.shape[1:] != target.shape:
+        raise ValueError(
+            "Expected samples.shape[1:] == target.shape. "
+            f"Got samples={samples.shape}, target={target.shape}."
+        )
+
+    counts = tuple(
+        sorted(
+            {
+                int(count)
+                for count in sample_counts
+            }
+        )
+    )
+
+    if not counts:
+        raise ValueError(
+            "sample_counts must contain at least one value."
+        )
+
+    if any(
+        count < 2
+        for count in counts
+    ):
+        raise ValueError(
+            "Every shape-analysis sample count must be at least two. "
+            f"Got {counts}."
+        )
+
+    max_available = int(
+        samples.shape[0]
+    )
+
+    if max(counts) > max_available:
+        raise ValueError(
+            "Shape analysis requested more samples than were generated. "
+            f"Requested {max(counts)}, available {max_available}."
+        )
+
+    rank_sample_count = int(
+        rank_sample_count
+    )
+
+    if not (
+        2
+        <= rank_sample_count
+        <= max_available
+    ):
+        raise ValueError(
+            "rank_sample_count must be between two and the number "
+            f"of generated samples. Got {rank_sample_count}."
+        )
+
+    if (
+        gaussian_loc is None
+    ) != (
+        gaussian_scale is None
+    ):
+        raise ValueError(
+            "gaussian_loc and gaussian_scale must either both be "
+            "provided or both be None."
+        )
+
+    batch_size = int(
+        target.shape[0]
+    )
+    num_targets = int(
+        target.shape[1]
+    )
+    output_dim = int(
+        target.shape[2]
+    )
+
+    empirical_by_count: Dict[
+        int,
+        torch.Tensor,
+    ] = {}
+
+    moment_matched_by_count: Dict[
+        int,
+        torch.Tensor,
+    ] = {}
+
+    shape_delta_by_count: Dict[
+        int,
+        torch.Tensor,
+    ] = {}
+
+    for count in counts:
+        selected = samples[
+            :count
+        ]
+
+        empirical = crps_per_element_sorted(
+            samples=selected,
+            target=target,
+            alpha=1.0,
+        ).reshape(
+            batch_size,
+            -1,
+        ).mean(dim=1)
+
+        matched_loc = selected.mean(
+            dim=0,
+        )
+
+        matched_scale = selected.var(
+            dim=0,
+            unbiased=False,
+        ).clamp_min(
+            1.0e-12
+        ).sqrt()
+
+        moment_matched = (
+            gaussian_crps_per_element(
+                loc=matched_loc,
+                scale=matched_scale,
+                target=target,
+            )
+            .reshape(
+                batch_size,
+                -1,
+            )
+            .mean(dim=1)
+        )
+
+        empirical_by_count[
+            count
+        ] = empirical
+
+        moment_matched_by_count[
+            count
+        ] = moment_matched
+
+        shape_delta_by_count[
+            count
+        ] = (
+            moment_matched
+            - empirical
+        )
+
+    rank_counts = (
+        verification_rank_counts_per_task(
+            samples=samples[
+                :rank_sample_count
+            ],
+            target=target,
+        )
+    )
+
+    if gaussian_loc is not None:
+        assert (
+            gaussian_scale is not None
+        )
+
+        analytic_gaussian = (
+            gaussian_crps_per_element(
+                loc=gaussian_loc,
+                scale=gaussian_scale,
+                target=target,
+            )
+            .reshape(
+                batch_size,
+                -1,
+            )
+            .mean(dim=1)
+        )
+    else:
+        analytic_gaussian = None
+
+    rows: List[
+        Dict[str, Any]
+    ] = []
+
+    exact_bucket = (
+        f"nc_{int(num_context):03d}"
+    )
+
+    for local_index in range(
+        batch_size
+    ):
+        row: Dict[str, Any] = {
+            "model_name": model_name,
+            "checkpoint_path": (
+                checkpoint_path
+            ),
+            "eval_set": eval_set,
+            "region": "all",
+            "context_bucket": (
+                exact_bucket
+            ),
+            "task_index": (
+                int(
+                    task_index_start
+                )
+                + local_index
+            ),
+            "num_context": int(
+                num_context
+            ),
+            "num_targets": (
+                num_targets
+            ),
+            "output_dim": (
+                output_dim
+            ),
+            "num_shape_samples_generated": (
+                max_available
+            ),
+            "rank_sample_count": (
+                rank_sample_count
+            ),
+            "crps_gaussian_analytic": (
+                float(
+                    analytic_gaussian[
+                        local_index
+                    ].item()
+                )
+                if (
+                    analytic_gaussian
+                    is not None
+                )
+                else float("nan")
+            ),
+        }
+
+        for count in counts:
+            suffix = (
+                f"m{count}"
+            )
+
+            row[
+                f"crps_empirical_{suffix}"
+            ] = float(
+                empirical_by_count[
+                    count
+                ][
+                    local_index
+                ].item()
+            )
+
+            row[
+                f"crps_mm_gaussian_{suffix}"
+            ] = float(
+                moment_matched_by_count[
+                    count
+                ][
+                    local_index
+                ].item()
+            )
+
+            row[
+                f"delta_shape_{suffix}"
+            ] = float(
+                shape_delta_by_count[
+                    count
+                ][
+                    local_index
+                ].item()
+            )
+
+        for rank_index, count in enumerate(
+            rank_counts[
+                local_index
+            ].tolist()
+        ):
+            row[
+                f"rank_{rank_index:03d}"
+            ] = int(
+                count
+            )
+
+        rows.append(
+            row
+        )
 
     return rows
 
