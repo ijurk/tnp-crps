@@ -1,0 +1,100 @@
+output_dir: results/synthetic_1d/sawtooth_interpolation_function_plots_dropout_curriculum_alpha095_comparison
+device: cuda
+base_generator_config: experiments/configs/generators/sawtooth_1d_interpolation.yml
+num_plot_samples: 256
+num_sample_paths: 8
+x_range:
+- -2.0
+- 2.0
+points_per_unit: 100
+search_batches: 2048
+models:
+- name: Gaussian TNP Fourier
+  model_config: experiments/configs/models/tnp_fourier.yml
+  checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-gaussian-fourier/sawtooth-fourier-v1/last.ckpt
+  overrides: []
+  show_sample_paths: false
+- name: DirectTNP Fourier deterministic
+  model_config: experiments/configs/models/tnp_direct_fourier_deterministic.yml
+  checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-direct-fourier-deterministic/sawtooth-direct-fourier-deterministic-v1/last.ckpt
+  overrides:
+  - params.num_samples=2
+  - params.val_num_samples=2
+  - params.test_num_samples=2
+  - params.p_dropout=0.0
+  - params.crps_alpha=1.0
+  - model.use_mc_dropout=false
+  show_sample_paths: false
+- name: Dropout CRPS M4 p0.10 Fourier from scratch
+  model_config: experiments/configs/models/tnp_crps_dropout_fourier.yml
+  checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-m4-p010/sawtooth-fourier-v1/last.ckpt
+  overrides:
+  - params.num_samples=4
+  - params.val_num_samples=10
+  - params.test_num_samples=64
+  - params.p_dropout=0.10
+  - params.crps_alpha=1.0
+  - model.use_mc_dropout=true
+  show_sample_paths: true
+- name: Dropout curriculum alpha1.00
+  model_config: experiments/configs/models/tnp_crps_dropout_fourier_curriculum.yml
+  checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-curriculum/sawtooth-dropout-fourier-curriculum-v1/last.ckpt
+  overrides:
+  - params.num_samples=4
+  - params.val_num_samples=10
+  - params.test_num_samples=64
+  - params.p_dropout=0.10
+  - params.crps_alpha=1.0
+  - model.use_mc_dropout=true
+  show_sample_paths: true
+- name: Dropout curriculum alpha0.95
+  model_config: experiments/configs/models/tnp_crps_dropout_fourier_curriculum_alpha095.yml
+  checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-curriculum-alpha095/sawtooth-dropout-fourier-curriculum-alpha095-v1/last.ckpt
+  overrides:
+  - params.num_samples=4
+  - params.val_num_samples=10
+  - params.test_num_samples=64
+  - params.p_dropout=0.10
+  - params.crps_alpha=0.95
+  - model.use_mc_dropout=true
+  show_sample_paths: true
+plot_specs:
+- name: sawtooth_dropout_alpha095_comparison_nc08
+  dataset: sawtooth_interpolation
+  min_nc: 8
+  max_nc: 8
+  task_index: 0
+  show_targets: true
+  show_ground_truth: true
+  show_realised_task: true
+  show_oracle_posterior: false
+  resample_dense_ground_truth: false
+  training_ranges:
+  - - -2.0
+    - 2.0
+- name: sawtooth_dropout_alpha095_comparison_nc16
+  dataset: sawtooth_interpolation
+  min_nc: 16
+  max_nc: 16
+  task_index: 0
+  show_targets: true
+  show_ground_truth: true
+  show_realised_task: true
+  show_oracle_posterior: false
+  resample_dense_ground_truth: false
+  training_ranges:
+  - - -2.0
+    - 2.0
+- name: sawtooth_dropout_alpha095_comparison_nc30
+  dataset: sawtooth_interpolation
+  min_nc: 30
+  max_nc: 30
+  task_index: 0
+  show_targets: true
+  show_ground_truth: true
+  show_realised_task: true
+  show_oracle_posterior: false
+  resample_dense_ground_truth: false
+  training_ranges:
+  - - -2.0
+    - 2.0

@@ -1,0 +1,33 @@
+output_dir: results/synthetic_1d/binary_latent_fork_eval_mixctx_full
+device: cuda
+num_eval_samples: 64
+samples_per_eval_set: 4096
+eval_batch_size: 16
+max_batches: null
+base_generator_config: experiments/configs/generators/binary_latent_fork_1d.yml
+eval_sets:
+- name: binary_latent_fork
+  kernel: null
+models:
+- name: binary_latent_fork_gaussian_tnp_nll
+  model_config: external/tnp/experiments/configs/models/tnp_lr_scheduler.yml
+  checkpoint_path: checkpoints/binary_latent_fork/synthetic-1d-binary-latent-fork/binary-latent-fork-gaussian-baseline/binary-latent-mixctx-v1/last.ckpt
+  overrides: []
+- name: binary_latent_fork_dropout_crps_m4_p010
+  model_config: experiments/configs/models/tnp_crps_dropout.yml
+  checkpoint_path: checkpoints/binary_latent_fork/synthetic-1d-binary-latent-fork/binary-latent-fork-dropout-m4-p010/binary-latent-mixctx-v1/last.ckpt
+  overrides:
+  - params.num_samples=4
+  - params.val_num_samples=10
+  - params.test_num_samples=64
+  - params.p_dropout=0.10
+  - params.crps_alpha=1.0
+- name: binary_latent_fork_stochln_crps_m4
+  model_config: experiments/configs/models/tnp_crps_stochln.yml
+  checkpoint_path: checkpoints/binary_latent_fork/synthetic-1d-binary-latent-fork/binary-latent-fork-stochln-m4/binary-latent-mixctx-v1/last.ckpt
+  overrides:
+  - params.num_samples=4
+  - params.val_num_samples=10
+  - params.test_num_samples=64
+  - params.crps_alpha=1.0
+  - params.layernorm_noise_dim=32

@@ -1,0 +1,50 @@
+output_dir: results/synthetic_1d/binary_latent_fork_histograms
+device: cuda
+
+base_generator_config: experiments/configs/generators/binary_latent_fork_1d.yml
+
+num_hist_samples: 1024
+num_oracle_samples: 4096
+bins: 55
+search_batches: 512
+
+models:
+  - name: Gaussian TNP NLL
+    model_config: external/tnp/experiments/configs/models/tnp_lr_scheduler.yml
+    checkpoint_path: checkpoints/binary_latent_fork/synthetic-1d-binary-latent-fork/binary-latent-fork-gaussian-baseline/binary-latent-fork-v1/last.ckpt
+    overrides: []
+
+  - name: Dropout CRPS M4 p0.10
+    model_config: experiments/configs/models/tnp_crps_dropout.yml
+    checkpoint_path: checkpoints/binary_latent_fork/synthetic-1d-binary-latent-fork/binary-latent-fork-dropout-m4-p010/binary-latent-fork-v1/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.val_num_samples=10
+      - params.test_num_samples=64
+      - params.p_dropout=0.10
+      - params.crps_alpha=1.0
+
+  - name: StochLN CRPS M4
+    model_config: experiments/configs/models/tnp_crps_stochln.yml
+    checkpoint_path: checkpoints/binary_latent_fork/synthetic-1d-binary-latent-fork/binary-latent-fork-stochln-m4/binary-latent-fork-v1/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.val_num_samples=10
+      - params.test_num_samples=64
+      - params.crps_alpha=1.0
+      - params.layernorm_noise_dim=32
+
+hist_specs:
+  - name: binary_latent_fork_hist_example_0
+    dataset: binary_latent_fork
+    min_nc: 8
+    max_nc: 32
+    task_index: 0
+    x_locations: [-0.5, 0.05, 0.25, 1.0]
+
+  - name: binary_latent_fork_hist_example_1
+    dataset: binary_latent_fork
+    min_nc: 8
+    max_nc: 32
+    task_index: 1
+    x_locations: [-0.5, 0.05, 0.25, 1.0]

@@ -1,0 +1,48 @@
+output_dir: results/tabular/mlp_nc128_smoke_eval_v2
+
+evaluation_kind: tabular
+metric_alpha: 1.0
+sampling_seed: 20260724
+
+base_generator_config: experiments/configs/generators/tabular_mlp_nc128.yml
+
+num_eval_samples: 64
+samples_per_eval_set: 32
+eval_batch_size: 4
+max_batches: null
+device: cuda
+
+models:
+  - name: context_mean
+    kind: context_mean
+    training_alpha: null
+
+  - name: context_gaussian
+    kind: context_gaussian
+    training_alpha: null
+
+  - name: context_resample
+    kind: context_resample
+    training_alpha: null
+
+  - name: gaussian_tnp
+    kind: model
+    training_alpha: null
+    model_config: experiments/configs/models/tnp_tabular_gaussian.yml
+    checkpoint_path: checkpoints/tabular_mlp_smoke/synthetic-tabular-regression/tabular-gaussian-L5-H8-D128/tabular-gaussian-smoke-v2/last.ckpt
+
+  - name: dropout_crps
+    kind: model
+    training_alpha: 1.0
+    model_config: experiments/configs/models/tnp_tabular_dropout.yml
+    checkpoint_path: checkpoints/tabular_mlp_smoke/synthetic-tabular-regression/tabular-dropout-m4-p0.1-a1.0-L5-H8-D128/tabular-dropout-m4-p005-smoke-v1/last.ckpt
+
+  - name: stochln_crps
+    kind: model
+    training_alpha: 1.0
+    model_config: experiments/configs/models/tnp_tabular_stochln.yml
+    checkpoint_path: checkpoints/tabular_mlp_smoke/synthetic-tabular-regression/tabular-stochln-m4-z32-a1.0-L5-H8-D128/tabular-stochln-m4-smoke-v1/last.ckpt
+
+eval_sets:
+  - name: mlp_nc128
+    sampling_seed: 20260724

@@ -1,0 +1,89 @@
+generators:
+  train:
+    _target_: tnp_crps.data.sawtooth.SawtoothGenerator
+    dim: ${params.dim_x}
+
+    min_freq: 2.0
+    max_freq: 4.0
+    noise_std: 0.0
+    jitter: 1.0e-6
+    return_gt_pred: true
+
+    # Keep min_nc=1 for compatibility with the current TNP pipeline.
+    min_nc: 64
+    max_nc: 64
+
+    min_nt: 100
+    max_nt: 100
+
+    context_range: ${params.context_range}
+    target_range: ${params.target_range}
+
+    samples_per_epoch: 16000
+    batch_size: 16
+
+  val:
+    _target_: tnp_crps.data.sawtooth.SawtoothGenerator
+    dim: ${params.dim_x}
+
+    min_freq: 2.0
+    max_freq: 4.0
+    noise_std: 0.0
+    jitter: 1.0e-6
+    return_gt_pred: true
+
+    min_nc: 64
+    max_nc: 64
+
+    min_nt: 100
+    max_nt: 100
+
+    context_range: ${params.context_range}
+    target_range: ${params.target_range}
+
+    samples_per_epoch: 4096
+    batch_size: 16
+    deterministic: true
+
+  test:
+    _target_: tnp_crps.data.sawtooth.SawtoothGenerator
+    dim: ${params.dim_x}
+
+    min_freq: 2.0
+    max_freq: 4.0
+    noise_std: 0.0
+    jitter: 1.0e-6
+    return_gt_pred: true
+
+    min_nc: 48
+    max_nc: 48
+
+    min_nt: 100
+    max_nt: 100
+
+    context_range: ${params.context_range}
+    target_range: ${params.target_range}
+
+    samples_per_epoch: 4096
+    batch_size: 16
+    deterministic: true
+
+params:
+  dim_x: 1
+  dim_y: 1
+
+  # Initial experiment is interpolation only.
+  context_range: [[-2.0, 2.0]]
+  target_range: [[-2.0, 2.0]]
+
+misc:
+  project: synthetic-1d-sawtooth-interpolation
+  eval_name: test
+  seed: 1
+  only_plots: false
+  num_plots: 10
+  subplots: false
+  savefig: false
+  logging: false
+  plot_interval: 10
+  check_val_every_n_epoch: 1

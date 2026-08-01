@@ -34,3 +34,11 @@ slurm-*.out
 .DS_Store
 .vscode/
 .idea/
+
+# Keep source-code data generators in version control
+!tnp_crps/data/
+!tnp_crps/data/__init__.py
+!tnp_crps/data/*.py
+wandb_cache/
+
+wandb_data/

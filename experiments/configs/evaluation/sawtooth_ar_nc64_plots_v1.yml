@@ -1,0 +1,78 @@
+output_dir: results/sawtooth/ar_nc64_plots_v1
+refuse_overwrite: true
+device: cuda
+
+base_generator_config: experiments/configs/generators/sawtooth_1d_interpolation_nc64.yml
+
+num_plot_samples: 256
+num_sample_paths: 8
+
+x_range: [-2.0, 2.0]
+points_per_unit: 100
+search_batches: 2048
+
+ar_points_per_unit: 100
+num_ar_samples: 128
+
+num_ar_anchors: 16
+training_max_nc: 64
+ar_anchor_range: [-2.0, 2.0]
+
+anchor_placement: uniform_random
+anchor_seed: 20260720
+
+denoise_chunk_size: 8
+
+models:
+  - name: Dropout CRPS, train Nc=64
+    model_config: experiments/configs/models/tnp_crps_dropout_fourier.yml
+    checkpoint_path: checkpoints/sawtooth_context_ladder/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-fixed-nc64/sawtooth-dropout-fourier-fixed-nc64-v1/last.ckpt
+    show_sample_paths: false
+    show_ar_sample_paths: true
+    overrides:
+      - params.num_samples=4
+      - params.val_num_samples=10
+      - params.test_num_samples=64
+      - params.p_dropout=0.10
+      - params.crps_alpha=1.0
+      - model.use_mc_dropout=true
+
+plot_specs:
+  - name: sawtooth_ar_nc64_task0
+    figure_title: "Autoregressive sawtooth samples ($N_c=48$, $K=16$)"
+    dataset: sawtooth_interpolation
+    min_nc: 48
+    max_nc: 48
+    task_index: 0
+    show_targets: false
+    resample_dense_ground_truth: false
+    show_ground_truth: true
+    show_realised_task: true
+    show_oracle_posterior: false
+    y_lim: [-0.1, 1.1]
+
+  - name: sawtooth_ar_nc64_task1
+    figure_title: "Autoregressive sawtooth samples ($N_c=48$, $K=16$)"
+    dataset: sawtooth_interpolation
+    min_nc: 48
+    max_nc: 48
+    task_index: 1
+    show_targets: false
+    resample_dense_ground_truth: false
+    show_ground_truth: true
+    show_realised_task: true
+    show_oracle_posterior: false
+    y_lim: [-0.1, 1.1]
+
+  - name: sawtooth_ar_nc64_task2
+    figure_title: "Autoregressive sawtooth samples ($N_c=48$, $K=16$)"
+    dataset: sawtooth_interpolation
+    min_nc: 48
+    max_nc: 48
+    task_index: 2
+    show_targets: false
+    resample_dense_ground_truth: false
+    show_ground_truth: true
+    show_realised_task: true
+    show_oracle_posterior: false
+    y_lim: [-0.1, 1.1]

@@ -1,0 +1,46 @@
+output_dir: results/synthetic_1d/sawtooth_interpolation_gate_dropout_curriculum
+device: cuda
+base_generator_config: experiments/configs/generators/sawtooth_1d_interpolation.yml
+num_eval_samples: 64
+num_tasks_per_nc: 4096
+eval_batch_size: 16
+fixed_nc_values:
+- 8
+- 16
+- 30
+seed: 20260715
+models:
+- name: Gaussian TNP Fourier
+  model_config: experiments/configs/models/tnp_fourier.yml
+  checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-gaussian-fourier/sawtooth-fourier-v1/last.ckpt
+  overrides: []
+- name: DirectTNP Fourier deterministic
+  model_config: experiments/configs/models/tnp_direct_fourier_deterministic.yml
+  checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-direct-fourier-deterministic/sawtooth-direct-fourier-deterministic-v1/last.ckpt
+  overrides:
+  - params.num_samples=2
+  - params.val_num_samples=2
+  - params.test_num_samples=2
+  - params.p_dropout=0.0
+  - params.crps_alpha=1.0
+  - model.use_mc_dropout=false
+- name: Dropout CRPS M4 p0.10 Fourier from scratch
+  model_config: experiments/configs/models/tnp_crps_dropout_fourier.yml
+  checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-m4-p010/sawtooth-fourier-v1/last.ckpt
+  overrides:
+  - params.num_samples=4
+  - params.val_num_samples=10
+  - params.test_num_samples=64
+  - params.p_dropout=0.10
+  - params.crps_alpha=1.0
+  - model.use_mc_dropout=true
+- name: Dropout CRPS M4 p0.10 Fourier curriculum
+  model_config: experiments/configs/models/tnp_crps_dropout_fourier_curriculum.yml
+  checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-curriculum/sawtooth-dropout-fourier-curriculum-v1/last.ckpt
+  overrides:
+  - params.num_samples=4
+  - params.val_num_samples=10
+  - params.test_num_samples=64
+  - params.p_dropout=0.10
+  - params.crps_alpha=1.0
+  - model.use_mc_dropout=true

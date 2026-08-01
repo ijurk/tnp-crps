@@ -1,0 +1,117 @@
+generators:
+  train:
+    _target_: tnp_crps.data.tabular.TabularRegressionGenerator
+    source:
+      _target_: tnp_crps.data.tabular_disk.TabICLDiskTaskSource
+      bank_dir: ${oc.env:TABICL_BANK_DIR}
+      split: train
+      seed: 20260726
+      shuffle: true
+      cycle: true
+    dim: ${params.dim_x}
+    max_input_features: ${params.dim_x}
+    x_preprocessing_mode: tabicl_context
+    y_preprocessing_mode: zscore
+    tabicl_outlier_threshold: 4.0
+    tabicl_standardized_clip: 100.0
+    epsilon: 1.0e-06
+    min_context_target_std: 1.0e-06
+    max_abs_standardized_input: 50.0
+    max_abs_standardized_target: 50.0
+    max_task_attempts: 64
+    permute_features: true
+    permute_rows: true
+    min_nc: 16
+    max_nc: 128
+    min_nt: 128
+    max_nt: 128
+    samples_per_epoch: 16000
+    batch_size: 16
+    context_sizes:
+    - 16
+    - 32
+    - 64
+    - 128
+  val:
+    _target_: tnp_crps.data.tabular.TabularRegressionGenerator
+    source:
+      _target_: tnp_crps.data.tabular_disk.TabICLDiskTaskSource
+      bank_dir: ${oc.env:TABICL_BANK_DIR}
+      split: val
+      seed: 20260727
+      shuffle: false
+      cycle: true
+    dim: ${params.dim_x}
+    max_input_features: ${params.dim_x}
+    x_preprocessing_mode: tabicl_context
+    y_preprocessing_mode: zscore
+    tabicl_outlier_threshold: 4.0
+    tabicl_standardized_clip: 100.0
+    epsilon: 1.0e-06
+    min_context_target_std: 1.0e-06
+    max_abs_standardized_input: 50.0
+    max_abs_standardized_target: 50.0
+    max_task_attempts: 64
+    permute_features: true
+    permute_rows: true
+    min_nc: 16
+    max_nc: 128
+    min_nt: 128
+    max_nt: 128
+    samples_per_epoch: 4096
+    batch_size: 16
+    deterministic: true
+    deterministic_seed: 20260727
+    context_sizes:
+    - 16
+    - 32
+    - 64
+    - 128
+  test:
+    _target_: tnp_crps.data.tabular.TabularRegressionGenerator
+    source:
+      _target_: tnp_crps.data.tabular_disk.TabICLDiskTaskSource
+      bank_dir: ${oc.env:TABICL_BANK_DIR}
+      split: test
+      seed: 20260728
+      shuffle: false
+      cycle: true
+    dim: ${params.dim_x}
+    max_input_features: ${params.dim_x}
+    x_preprocessing_mode: tabicl_context
+    y_preprocessing_mode: zscore
+    tabicl_outlier_threshold: 4.0
+    tabicl_standardized_clip: 100.0
+    epsilon: 1.0e-06
+    min_context_target_std: 1.0e-06
+    max_abs_standardized_input: 50.0
+    max_abs_standardized_target: 50.0
+    max_task_attempts: 64
+    permute_features: true
+    permute_rows: true
+    min_nc: 128
+    max_nc: 128
+    min_nt: 128
+    max_nt: 128
+    samples_per_epoch: 4096
+    batch_size: 16
+    deterministic: true
+    deterministic_seed: 20260728
+    context_sizes: null
+params:
+  dim_x: 20
+  dim_y: 1
+misc:
+  project: synthetic-tabular-regression
+  eval_name: test
+  seed: 1
+  num_workers: 2
+  num_val_workers: 0
+  pin_memory: false
+  only_plots: false
+  num_plots: 10
+  subplots: false
+  savefig: false
+  logging: false
+  plot_interval: 100
+  check_val_every_n_epoch: 1

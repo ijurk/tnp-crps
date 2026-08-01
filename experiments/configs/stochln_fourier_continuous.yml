@@ -1,0 +1,63 @@
+params:
+  epochs: 500
+
+  num_samples: 4
+  val_num_samples: 10
+  test_num_samples: 64
+
+  crps_alpha: 1.0
+
+optimiser:
+  lr: 5.0e-4
+
+scheduler:
+  type: warmup_cosine
+
+  warmup:
+    steps: null
+    fraction: 0.10
+
+  cosine:
+    T_max: null
+    eta_min: 1.0e-6
+
+misc:
+  name: sawtooth-stochln-fourier-context-curriculum
+  run_group: sawtooth_context_curriculum
+  run_id: null
+
+  logging: true
+
+  # Required because the callback mutates the generator in the
+  # main training process.
+  num_workers: 0
+  num_val_workers: 0
+  pin_memory: false
+
+  check_val_every_n_epoch: 1
+  checkpoint_interval: 25
+  plot_interval: 25
+  gradient_clip_val: 0.5
+
+  # One continuous run from scratch.
+  resume_from_checkpoint: null
+  init_weights_from: null
+
+  context_curriculum:
+    enabled: true
+
+    stages:
+      - name: stage1_nc64
+        start_epoch: 0
+        min_nc: 64
+        max_nc: 64
+
+      - name: stage2_nc56_64
+        start_epoch: 200
+        min_nc: 56
+        max_nc: 64
+
+      - name: stage3_nc48_64
+        start_epoch: 350
+        min_nc: 48
+        max_nc: 64

@@ -1,0 +1,91 @@
+model:
+  _target_: tnp_crps.models.tnp_crps.DirectTNP
+  encoder: ${tnp_encoder}
+  decoder: ${tnp_decoder}
+  num_samples: ${params.num_samples}
+  crps_alpha: ${params.crps_alpha}
+  use_mc_dropout: false
+tnp_encoder:
+  _target_: tnp.models.tnp.TNPEncoder
+  transformer_encoder: ${transformer_encoder}
+  xy_encoder: ${xy_encoder}
+  x_encoder: ${x_encoder}
+transformer_encoder:
+  _target_: tnp.networks.transformer.TNPTransformerEncoder
+  mhsa_layer: ${mhsa_layer}
+  mhca_layer: ${mhca_layer}
+  num_layers: ${params.num_layers}
+mhsa_layer:
+  _target_: tnp.networks.attention_layers.MultiHeadSelfAttentionLayer
+  embed_dim: ${params.embed_dim}
+  num_heads: ${params.num_heads}
+  head_dim: ${params.head_dim}
+  feedforward_dim: ${params.embed_dim}
+  norm_first: ${params.norm_first}
+  p_dropout: ${params.p_dropout}
+mhca_layer:
+  _target_: tnp.networks.attention_layers.MultiHeadCrossAttentionLayer
+  embed_dim: ${params.embed_dim}
+  num_heads: ${params.num_heads}
+  head_dim: ${params.head_dim}
+  feedforward_dim: ${params.embed_dim}
+  norm_first: ${params.norm_first}
+  p_dropout: ${params.p_dropout}
+xy_encoder:
+  _target_: tnp.networks.mlp.MLP
+  in_dim: ${eval:'1 + ${params.dim_y} + ${params.x_fourier_dim}'}
+  out_dim: ${params.embed_dim}
+  num_layers: 2
+  width: ${params.embed_dim}
+tnp_decoder:
+  _target_: tnp.models.tnp.TNPDecoder
+  z_decoder: ${z_decoder}
+z_decoder:
+  _target_: tnp.networks.mlp.MLP
+  in_dim: ${params.embed_dim}
+  out_dim: ${params.dim_y}
+  num_layers: 2
+  width: ${params.embed_dim}
+optimiser:
+  _target_: torch.optim.AdamW
+  _partial_: true
+  lr: 0.0005
+scheduler:
+  type: warmup_cosine
+  warmup:
+    steps: null
+    fraction: 0.1
+  cosine:
+    T_max: null
+    eta_min: 1.0e-06
+params:
+  epochs: 500
+  embed_dim: 128
+  num_heads: 8
+  head_dim: 16
+  norm_first: true
+  num_layers: 5
+  num_samples: 2
+  val_num_samples: 2
+  test_num_samples: 2
+  crps_alpha: 1.0
+  p_dropout: 0.0
+  x_fourier_dim: 20
+  fourier_min_wavelength: 0.05
+  fourier_max_wavelength: 2.0
+misc:
+  name: TNP-CRPS-Dropout-L${params.num_layers}-H${params.num_heads}-D${params.embed_dim}
+  run_group: crps_tnp_dropout
+  run_id: null
+  resume_from_checkpoint: null
+  gradient_clip_val: 0.5
+  plot_interval: 10
+  pin_memory: false
+  init_weights_from: null
+x_encoder:
+  _target_: tnp.networks.embeddings.FourierEmbedding
+  lower: ${params.fourier_min_wavelength}
+  upper: ${params.fourier_max_wavelength}
+  active_dim: 0
+  assert_range: false
+  num_wavelengths: ${params.x_fourier_dim}

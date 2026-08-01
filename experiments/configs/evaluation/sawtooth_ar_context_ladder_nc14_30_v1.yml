@@ -1,0 +1,76 @@
+evaluation_mode: ar_anchors
+
+output_dir: results/sawtooth/ar_context_ladder_nc14_30_v1
+refuse_overwrite: true
+device: cuda
+
+base_generator_config: experiments/configs/generators/sawtooth_1d_interpolation_nc14_30.yml
+
+# Development evaluation. Override with 80,000 for final results.
+num_tasks: 4096
+
+# Number of independent AR rollout paths per test task.
+num_ar_samples: 50
+
+eval_batch_size: 8
+
+# Rollout contexts traverse 14, 15, ..., 30.
+eval_nc: 14
+num_ar_anchors: 16
+training_max_nc: 30
+
+ar_anchor_range: [-2.0, 2.0]
+anchor_seed: 20260720
+
+target_order: random
+stochln_noise_mode: refresh
+
+seed: 20260720
+
+models:
+  - name: Gaussian NLL, train Nc 1-30
+    model_config: experiments/configs/models/tnp_fourier.yml
+    checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-gaussian-fourier/sawtooth-fourier-v1/last.ckpt
+    overrides: []
+
+  - name: Dropout CRPS, train Nc 1-30
+    model_config: experiments/configs/models/tnp_crps_dropout_fourier.yml
+    checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-m4-p010/sawtooth-fourier-v1/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.val_num_samples=10
+      - params.test_num_samples=64
+      - params.p_dropout=0.10
+      - params.crps_alpha=1.0
+      - model.use_mc_dropout=true
+
+  - name: StochLN CRPS, train Nc 1-30
+    model_config: experiments/configs/models/tnp_crps_stochln_fourier.yml
+    checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-stochln-fourier-m4/sawtooth-fourier-v1/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.val_num_samples=10
+      - params.test_num_samples=64
+      - params.crps_alpha=1.0
+      - params.layernorm_noise_dim=32
+
+  - name: Dropout CRPS, train Nc 14-30
+    model_config: experiments/configs/models/tnp_crps_dropout_fourier.yml
+    checkpoint_path: checkpoints/sawtooth_context_ladder/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-nc14-30/sawtooth-dropout-fourier-nc14-30-v1/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.val_num_samples=10
+      - params.test_num_samples=64
+      - params.p_dropout=0.10
+      - params.crps_alpha=1.0
+      - model.use_mc_dropout=true
+
+  - name: StochLN CRPS, train Nc 14-30
+    model_config: experiments/configs/models/tnp_crps_stochln_fourier.yml
+    checkpoint_path: checkpoints/sawtooth_context_ladder/synthetic-1d-sawtooth-interpolation/sawtooth-stochln-fourier-nc14-30/sawtooth-stochln-fourier-nc14-30-v1/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.val_num_samples=10
+      - params.test_num_samples=64
+      - params.crps_alpha=1.0
+      - params.layernorm_noise_dim=32

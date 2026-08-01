@@ -1,0 +1,101 @@
+output_dir: results/synthetic_1d/binary_latent_fork_ar_anchor_old
+device: cuda
+base_generator_config: experiments/configs/generators/binary_latent_fork_1d.yml
+num_plot_samples: 256
+num_sample_paths: 8
+x_range:
+- -4.0
+- 4.0
+points_per_unit: 80
+search_batches: 512
+models:
+- name: Gaussian TNP NLL
+  model_config: external/tnp/experiments/configs/models/tnp_lr_scheduler.yml
+  checkpoint_path: checkpoints/binary_latent_fork/synthetic-1d-binary-latent-fork/binary-latent-fork-gaussian-baseline/binary-latent-fork-v1/last.ckpt
+  show_sample_paths: false
+  overrides: []
+- name: Dropout CRPS M4 p0.10
+  model_config: experiments/configs/models/tnp_crps_dropout.yml
+  checkpoint_path: checkpoints/binary_latent_fork/synthetic-1d-binary-latent-fork/binary-latent-fork-dropout-m4-p010/binary-latent-fork-v1/last.ckpt
+  show_sample_paths: true
+  overrides:
+  - params.num_samples=4
+  - params.val_num_samples=10
+  - params.test_num_samples=64
+  - params.p_dropout=0.10
+  - params.crps_alpha=1.0
+- name: StochLN CRPS M4
+  model_config: experiments/configs/models/tnp_crps_stochln.yml
+  checkpoint_path: checkpoints/binary_latent_fork/synthetic-1d-binary-latent-fork/binary-latent-fork-stochln-m4/binary-latent-fork-v1/last.ckpt
+  show_sample_paths: true
+  overrides:
+  - params.num_samples=4
+  - params.val_num_samples=10
+  - params.test_num_samples=64
+  - params.crps_alpha=1.0
+  - params.layernorm_noise_dim=32
+plot_specs:
+- name: binary_latent_fork_example_0
+  dataset: binary_latent_fork
+  min_nc: 8
+  max_nc: 32
+  task_index: 0
+  show_targets: true
+  sampling_mode: one-shot
+  resample_dense_ground_truth: true
+  show_ground_truth: true
+  show_realised_task: true
+  show_oracle_posterior: true
+  training_ranges:
+  - - -4.0
+    - -0.25
+- name: binary_latent_fork_example_1
+  dataset: binary_latent_fork
+  min_nc: 8
+  max_nc: 32
+  task_index: 1
+  show_targets: true
+  sampling_mode: one-shot
+  resample_dense_ground_truth: true
+  show_ground_truth: true
+  show_realised_task: true
+  show_oracle_posterior: true
+  training_ranges:
+  - - -4.0
+    - -0.25
+- name: binary_latent_fork_example_2
+  dataset: binary_latent_fork
+  min_nc: 8
+  max_nc: 32
+  task_index: 2
+  show_targets: true
+  sampling_mode: one-shot
+  resample_dense_ground_truth: true
+  show_ground_truth: true
+  show_realised_task: true
+  show_oracle_posterior: true
+  training_ranges:
+  - - -4.0
+    - -0.25
+- name: binary_latent_fork_example_3
+  dataset: binary_latent_fork
+  min_nc: 8
+  max_nc: 32
+  task_index: 3
+  show_targets: true
+  sampling_mode: one-shot
+  resample_dense_ground_truth: true
+  show_ground_truth: true
+  show_realised_task: true
+  show_oracle_posterior: true
+  training_ranges:
+  - - -4.0
+    - -0.25
+ar_points_per_unit: 32
+num_ar_samples: 128
+num_ar_anchors: 16
+training_max_nc: 32
+ar_anchor_range:
+- 0.1
+- 4.0
+denoise_chunk_size: 16

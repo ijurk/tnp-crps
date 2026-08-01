@@ -1,0 +1,18 @@
+params:
+  epochs: 500
+
+misc:
+  logging: true
+  run_group: tabular_tabicl_fixed_nc_500
+
+  checkpoint_interval: 25
+  plot_interval: 100
+
+  num_workers: 2
+  num_val_workers: 0
+  pin_memory: false
+
+  check_val_every_n_epoch: 1
+
+  resume_from_checkpoint: null
+  init_weights_from: null

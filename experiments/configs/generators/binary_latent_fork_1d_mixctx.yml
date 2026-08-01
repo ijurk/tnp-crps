@@ -1,0 +1,88 @@
+generators:
+  train:
+    _target_: tnp_crps.data.binary_latent_fork.BinaryLatentForkGeneratorMixedContext
+    dim: ${params.dim_x}
+    lengthscale: 1.0
+    base_scale: 0.5
+    delta: 2.0
+    fork_x0: 0.0
+    transition_width: 0.1
+    noise_std: 0.05
+    jitter: 1.0e-5
+    return_gt_pred: true
+    min_nc: 8
+    max_nc: 64
+    min_nt: 128
+    max_nt: 128
+    context_range: ${params.context_range}
+    full_context_range: ${params.target_range}
+    p_revealing: 0.5
+    target_range: ${params.target_range}
+    samples_per_epoch: 16000
+    batch_size: 16
+
+  val:
+    _target_: tnp_crps.data.binary_latent_fork.BinaryLatentForkGenerator
+    dim: ${params.dim_x}
+    lengthscale: 1.0
+    base_scale: 0.5
+    delta: 2.0
+    fork_x0: 0.0
+    transition_width: 0.1
+    noise_std: 0.05
+    jitter: 1.0e-5
+    return_gt_pred: true
+    min_nc: 8
+    max_nc: 32
+    min_nt: 128
+    max_nt: 128
+    context_range: ${params.context_range}
+    target_range: ${params.target_range}
+    samples_per_epoch: 4096
+    batch_size: 16
+    deterministic: true
+
+  test:
+    _target_: tnp_crps.data.binary_latent_fork.BinaryLatentForkGenerator
+    dim: ${params.dim_x}
+    lengthscale: 1.0
+    base_scale: 0.5
+    delta: 2.0
+    fork_x0: 0.0
+    transition_width: 0.1
+    noise_std: 0.05
+    jitter: 1.0e-5
+    return_gt_pred: true
+    min_nc: 8
+    max_nc: 32
+    min_nt: 128
+    max_nt: 128
+    context_range: ${params.context_range}
+    target_range: ${params.target_range}
+    samples_per_epoch: 4096
+    batch_size: 16
+    deterministic: true
+
+params:
+  dim_x: 1
+  dim_y: 1
+
+  # Context range for the ambiguous training family and for all validation/test
+  # tasks. It is strictly pre-fork and separated from the transition.
+  context_range: [[-4.0, -0.25]]
+
+  # Target range for all splits. The mixed training generator also uses this
+  # as full_context_range for its revealing-context task family.
+  target_range: [[-4.0, 4.0]]
+
+misc:
+  project: synthetic-1d-binary-latent-fork
+  eval_name: test
+  seed: 1
+  only_plots: false
+  num_plots: 10
+  subplots: false
+  savefig: false
+  logging: false
+  plot_interval: 10
+  check_val_every_n_epoch: 1

@@ -1,0 +1,87 @@
+output_dir: results/tabular/tabicl_nc128_500_val_milestones_v2
+
+evaluation_kind: tabular
+metric_alpha: 1.0
+
+# Default evaluation-sampling seed.
+sampling_seed: 20260727
+
+num_eval_samples: 64
+samples_per_eval_set: 4096
+eval_batch_size: 16
+max_batches: null
+device: cuda
+
+base_generator_config: experiments/configs/generators/tabular_tabicl_bank_nc128.yml
+
+models:
+  - name: gaussian_500run_e075
+    model_config: experiments/configs/models/tnp_tabular_gaussian.yml
+    checkpoint_path: checkpoints/tabular_tabicl_nc128_500/synthetic-tabular-regression/tabular-gaussian-L5-H8-D128/tabicl-nc128-gaussian-500ep-seed1-v1/epoch=0074.ckpt
+    training_alpha: null
+
+  - name: gaussian_500run_e100
+    model_config: experiments/configs/models/tnp_tabular_gaussian.yml
+    checkpoint_path: checkpoints/tabular_tabicl_nc128_500/synthetic-tabular-regression/tabular-gaussian-L5-H8-D128/tabicl-nc128-gaussian-500ep-seed1-v1/epoch=0099.ckpt
+    training_alpha: null
+
+  - name: gaussian_500run_e250
+    model_config: experiments/configs/models/tnp_tabular_gaussian.yml
+    checkpoint_path: checkpoints/tabular_tabicl_nc128_500/synthetic-tabular-regression/tabular-gaussian-L5-H8-D128/tabicl-nc128-gaussian-500ep-seed1-v1/epoch=0249.ckpt
+    training_alpha: null
+
+  - name: gaussian_500run_e500
+    model_config: experiments/configs/models/tnp_tabular_gaussian.yml
+    checkpoint_path: checkpoints/tabular_tabicl_nc128_500/synthetic-tabular-regression/tabular-gaussian-L5-H8-D128/tabicl-nc128-gaussian-500ep-seed1-v1/epoch=0499.ckpt
+    training_alpha: null
+
+  - name: dropout_500run_e075
+    model_config: experiments/configs/models/tnp_tabular_dropout.yml
+    checkpoint_path: checkpoints/tabular_tabicl_nc128_500/synthetic-tabular-regression/tabular-dropout-m4-p0.1-a1.0-L5-H8-D128/tabicl-nc128-dropout-m4-p010-a1-500ep-seed1-v1/epoch=0074.ckpt
+    training_alpha: 1.0
+
+  - name: dropout_500run_e100
+    model_config: experiments/configs/models/tnp_tabular_dropout.yml
+    checkpoint_path: checkpoints/tabular_tabicl_nc128_500/synthetic-tabular-regression/tabular-dropout-m4-p0.1-a1.0-L5-H8-D128/tabicl-nc128-dropout-m4-p010-a1-500ep-seed1-v1/epoch=0099.ckpt
+    training_alpha: 1.0
+
+  - name: dropout_500run_e250
+    model_config: experiments/configs/models/tnp_tabular_dropout.yml
+    checkpoint_path: checkpoints/tabular_tabicl_nc128_500/synthetic-tabular-regression/tabular-dropout-m4-p0.1-a1.0-L5-H8-D128/tabicl-nc128-dropout-m4-p010-a1-500ep-seed1-v1/epoch=0249.ckpt
+    training_alpha: 1.0
+
+  - name: dropout_500run_e500
+    model_config: experiments/configs/models/tnp_tabular_dropout.yml
+    checkpoint_path: checkpoints/tabular_tabicl_nc128_500/synthetic-tabular-regression/tabular-dropout-m4-p0.1-a1.0-L5-H8-D128/tabicl-nc128-dropout-m4-p010-a1-500ep-seed1-v1/epoch=0499.ckpt
+    training_alpha: 1.0
+
+  - name: stochln_500run_e075
+    model_config: experiments/configs/models/tnp_tabular_stochln.yml
+    checkpoint_path: checkpoints/tabular_tabicl_nc128_500/synthetic-tabular-regression/tabular-stochln-m4-z32-a1.0-L5-H8-D128/tabicl-nc128-stochln-m4-z32-a1-500ep-seed1-v1/epoch=0074.ckpt
+    training_alpha: 1.0
+
+  - name: stochln_500run_e100
+    model_config: experiments/configs/models/tnp_tabular_stochln.yml
+    checkpoint_path: checkpoints/tabular_tabicl_nc128_500/synthetic-tabular-regression/tabular-stochln-m4-z32-a1.0-L5-H8-D128/tabicl-nc128-stochln-m4-z32-a1-500ep-seed1-v1/epoch=0099.ckpt
+    training_alpha: 1.0
+
+  - name: stochln_500run_e250
+    model_config: experiments/configs/models/tnp_tabular_stochln.yml
+    checkpoint_path: checkpoints/tabular_tabicl_nc128_500/synthetic-tabular-regression/tabular-stochln-m4-z32-a1.0-L5-H8-D128/tabicl-nc128-stochln-m4-z32-a1-500ep-seed1-v1/epoch=0249.ckpt
+    training_alpha: 1.0
+
+  - name: stochln_500run_e500
+    model_config: experiments/configs/models/tnp_tabular_stochln.yml
+    checkpoint_path: checkpoints/tabular_tabicl_nc128_500/synthetic-tabular-regression/tabular-stochln-m4-z32-a1.0-L5-H8-D128/tabicl-nc128-stochln-m4-z32-a1-500ep-seed1-v1/epoch=0499.ckpt
+    training_alpha: 1.0
+eval_sets:
+  - name: tabicl_nc128_val
+    # Keep the same Monte Carlo seed as the locked validation baseline.
+    sampling_seed: 20260724
+    overrides:
+      - generators.test.source.split=val
+      - generators.test.source.seed=20260727
+      - generators.test.source.shuffle=false
+      - generators.test.source.cycle=true
+      - generators.test.deterministic=true
+      - generators.test.deterministic_seed=20260727

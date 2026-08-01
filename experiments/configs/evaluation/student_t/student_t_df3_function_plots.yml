@@ -1,0 +1,68 @@
+output_dir: results/synthetic_1d/student_t_df3_function_plots
+device: cuda
+
+base_generator_config: experiments/configs/generators/student_t_process_1d_df3.yml
+
+num_plot_samples: 256
+num_sample_paths: 8
+x_range: [-4.0, 4.0]
+points_per_unit: 64
+search_batches: 1024
+
+models:
+  - name: Gaussian TNP NLL
+    model_config: external/tnp/experiments/configs/models/tnp_lr_scheduler.yml
+    checkpoint_path: checkpoints/student_t_process/synthetic-1d-student-t-process-df3/studentt-df3-gaussian-baseline/default-run/last.ckpt
+    show_sample_paths: false
+    overrides: []
+
+  - name: Dropout CRPS M4 p0.10
+    model_config: experiments/configs/models/tnp_crps_dropout.yml
+    checkpoint_path: checkpoints/student_t_process/synthetic-1d-student-t-process-df3/studentt-df3-dropout-m4-p010/default-run/last.ckpt
+    show_sample_paths: true
+    overrides:
+      - params.num_samples=4
+      - params.val_num_samples=10
+      - params.test_num_samples=64
+      - params.p_dropout=0.10
+      - params.crps_alpha=1.0
+
+  - name: StochLN CRPS M4
+    model_config: experiments/configs/models/tnp_crps_stochln.yml
+    checkpoint_path: checkpoints/student_t_process/synthetic-1d-student-t-process-df3/studentt-df3-stochln-m4/default-run/last.ckpt
+    show_sample_paths: true
+    overrides:
+      - params.num_samples=4
+      - params.val_num_samples=10
+      - params.test_num_samples=64
+      - params.crps_alpha=1.0
+      - params.layernorm_noise_dim=32
+
+plot_specs:
+  - name: student_t_df3_low_context
+    dataset: student_t_df3
+    max_nc: 4
+    task_index: 0
+    show_targets: true
+    show_ground_truth: true
+    show_oracle_posterior: true
+    show_realised_task: false
+
+  - name: student_t_df3_medium_context
+    dataset: student_t_df3
+    min_nc: 8
+    max_nc: 16
+    task_index: 0
+    show_targets: true
+    show_ground_truth: true
+    show_realised_task: false
+
+  - name: student_t_df3_high_context
+    dataset: student_t_df3
+    min_nc: 32
+    max_nc: 64
+    task_index: 0
+    show_targets: true
+    show_ground_truth: true
+    show_oracle_posterior: true
+    show_realised_task: false

@@ -1,0 +1,86 @@
+output_dir: results/synthetic_1d/sawtooth_ambiguous_function_plots
+device: cuda
+
+base_generator_config: experiments/configs/generators/sawtooth_1d_ambiguous.yml
+
+num_plot_samples: 256
+num_sample_paths: 8
+x_range: [-4.0, 4.0]
+points_per_unit: 100
+search_batches: 1024
+
+models:
+  - name: Gaussian TNP NLL
+    model_config: external/tnp/experiments/configs/models/tnp_lr_scheduler.yml
+    checkpoint_path: checkpoints/sawtooth_ambiguous/synthetic-1d-sawtooth-ambiguous/sawtooth-ambiguous-gaussian-baseline/ambiguous-v2/last.ckpt
+    show_sample_paths: false
+    overrides: []
+
+  - name: Dropout CRPS M4 p0.10
+    model_config: experiments/configs/models/tnp_crps_dropout.yml
+    checkpoint_path: checkpoints/sawtooth_ambiguous/synthetic-1d-sawtooth-ambiguous/sawtooth-ambiguous-dropout-m4-p010/ambiguous-v2/last.ckpt
+    show_sample_paths: true
+    overrides:
+      - params.num_samples=4
+      - params.val_num_samples=10
+      - params.test_num_samples=64
+      - params.p_dropout=0.10
+      - params.crps_alpha=1.0
+
+  - name: StochLN CRPS M4
+    model_config: experiments/configs/models/tnp_crps_stochln.yml
+    checkpoint_path: checkpoints/sawtooth_ambiguous/synthetic-1d-sawtooth-ambiguous/sawtooth-ambiguous-stochln-m4/ambiguous-v2/last.ckpt
+    show_sample_paths: true
+    overrides:
+      - params.num_samples=4
+      - params.val_num_samples=10
+      - params.test_num_samples=64
+      - params.crps_alpha=1.0
+      - params.layernorm_noise_dim=32
+
+plot_specs:
+  - name: sawtooth_ambiguous_low_context_0
+    dataset: sawtooth_ambiguous
+    max_nc: 4
+    task_index: 0
+    show_targets: true
+    show_ground_truth: true
+    show_realised_task: true
+    show_oracle_posterior: false
+    training_ranges:
+      - [-0.25, 0.25]
+
+  - name: sawtooth_ambiguous_low_context_1
+    dataset: sawtooth_ambiguous
+    max_nc: 4
+    task_index: 1
+    show_targets: true
+    show_ground_truth: true
+    show_realised_task: true
+    show_oracle_posterior: false
+    training_ranges:
+      - [-0.25, 0.25]
+
+  - name: sawtooth_ambiguous_medium_context_0
+    dataset: sawtooth_ambiguous
+    min_nc: 5
+    max_nc: 8
+    task_index: 0
+    show_targets: true
+    show_ground_truth: true
+    show_realised_task: true
+    show_oracle_posterior: false
+    training_ranges:
+      - [-0.25, 0.25]
+
+  - name: sawtooth_ambiguous_medium_context_1
+    dataset: sawtooth_ambiguous
+    min_nc: 5
+    max_nc: 8
+    task_index: 1
+    show_targets: true
+    show_ground_truth: true
+    show_realised_task: true
+    show_oracle_posterior: false
+    training_ranges:
+      - [-0.25, 0.25]
