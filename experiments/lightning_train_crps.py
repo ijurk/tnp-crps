@@ -144,7 +144,8 @@ def main():
             name=run_name,
             group=str(run_group) if run_group is not None else None,
             config=OmegaConf.to_container(experiment.config),
-            log_model="all",
+            # log_model="all",
+            log_model=False,
             save_dir=os.path.join(project_root, "logs"),
         )
         performance_callback = LogPerformanceCallback()
