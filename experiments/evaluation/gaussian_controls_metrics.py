@@ -148,30 +148,52 @@ def task_fingerprints(batch: Any) -> List[str]:
 
 
 def _context_bucket(num_context: int) -> str:
+    if num_context < 1:
+        raise ValueError(f"num_context must be >= 1, got {num_context}.")
     if num_context <= 4:
         return "nc_001_004"
     if num_context <= 16:
         return "nc_005_016"
-    return "nc_017_064"
+    if num_context <= 64:
+        return "nc_017_064"
+    raise ValueError(
+        f"num_context={num_context} exceeds the documented bucket range (max 64). "
+        "Extend _context_bucket before evaluating larger contexts."
+    )
 
 
 def _region_masks(
     *,
     xt: torch.Tensor,
     target: torch.Tensor,
-    context_range: Sequence[Sequence[float]],
+    xc: torch.Tensor,
 ) -> Mapping[str, torch.Tensor]:
+    """Region masks computed from each task's realised context support.
+
+    "interpolation" is the closed interval [min(xc), max(xc)] of the task's
+    own context inputs, not the generator's global sampling window; targets
+    outside that hull are "extrapolation". A task with a single context
+    point therefore has an interpolation region of measure zero.
+    """
     if xt.ndim != 3 or xt.shape[-1] != 1:
         raise ValueError(
             "Gaussian-control evaluation currently requires xt [B, Nt, 1]. "
             f"Got {tuple(xt.shape)}."
         )
+    if xc.ndim != 3 or xc.shape[-1] != 1:
+        raise ValueError(
+            "Gaussian-control evaluation currently requires xc [B, Nc, 1]. "
+            f"Got {tuple(xc.shape)}."
+        )
+    if int(xc.shape[0]) != int(xt.shape[0]):
+        raise ValueError(
+            f"xc batch {int(xc.shape[0])} != xt batch {int(xt.shape[0])}."
+        )
+    if int(xc.shape[1]) < 1:
+        raise ValueError("Region masks require at least one context point.")
 
-    if len(context_range) != 1 or len(context_range[0]) != 2:
-        raise ValueError(f"Expected one 1-D context range, got {context_range}.")
-
-    context_min = float(context_range[0][0])
-    context_max = float(context_range[0][1])
+    context_min = xc[..., 0].min(dim=1, keepdim=True).values
+    context_max = xc[..., 0].max(dim=1, keepdim=True).values
 
     interp = (
         (xt[..., 0] >= context_min)
@@ -198,7 +220,7 @@ def _rows_from_elementwise_components(
     *,
     target: torch.Tensor,
     xt: torch.Tensor,
-    context_range: Sequence[Sequence[float]],
+    xc: torch.Tensor,
     squared_error: torch.Tensor,
     crps: torch.Tensor,
     predictive_variance: torch.Tensor,
@@ -239,7 +261,7 @@ def _rows_from_elementwise_components(
     region_masks = _region_masks(
         xt=xt,
         target=target,
-        context_range=context_range,
+        xc=xc,
     )
 
     metadata_dict = _normalise_metadata(metadata)
@@ -340,7 +362,7 @@ def per_task_rows_sampled(
     samples: torch.Tensor,
     target: torch.Tensor,
     xt: torch.Tensor,
-    context_range: Sequence[Sequence[float]],
+    xc: torch.Tensor,
     task_index_start: int,
     generator_batch_index: int,
     fingerprints: Sequence[str],
@@ -386,7 +408,7 @@ def per_task_rows_sampled(
     return _rows_from_elementwise_components(
         target=target,
         xt=xt,
-        context_range=context_range,
+        xc=xc,
         squared_error=squared_error,
         crps=crps,
         predictive_variance=predictive_variance,
@@ -414,7 +436,7 @@ def per_task_rows_gaussian(
     scale: torch.Tensor,
     target: torch.Tensor,
     xt: torch.Tensor,
-    context_range: Sequence[Sequence[float]],
+    xc: torch.Tensor,
     task_index_start: int,
     generator_batch_index: int,
     fingerprints: Sequence[str],
@@ -458,7 +480,7 @@ def per_task_rows_gaussian(
     return _rows_from_elementwise_components(
         target=target,
         xt=xt,
-        context_range=context_range,
+        xc=xc,
         squared_error=squared_error,
         crps=crps,
         predictive_variance=predictive_variance,

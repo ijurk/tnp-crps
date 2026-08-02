@@ -232,8 +232,37 @@ def main() -> None:
         seed=int(figure_cfg["sampling_seed"]),
     )
 
+    source_by_name = {
+        str(entry["name"]): dict(entry)
+        for entry in cfg["sources"]
+    }
+    figure_source_names = [
+        str(name)
+        for name in figure_cfg.get(
+            "source_names",
+            [
+                "Gaussian TNP",
+                "Dropout CRPS-TNP",
+                "StochLN CRPS-TNP",
+            ],
+        )
+    ]
+
+    missing_figure_sources = [
+        name for name in figure_source_names if name not in source_by_name
+    ]
+    if missing_figure_sources:
+        raise KeyError(
+            "Figure source names are absent from config sources: "
+            f"{missing_figure_sources}."
+        )
+
+    figure_sources = [source_by_name[name] for name in figure_source_names]
+    if any(str(entry.get("kind", "model")) != "model" for entry in figure_sources):
+        raise ValueError("figure.source_names must contain learned model sources only.")
+
     learned = _load_learned_sources(
-        source_entries=list(cfg["sources"]),
+        source_entries=figure_sources,
         base_generator_config=str(cfg["base_generator_config"]),
         device=device,
     )

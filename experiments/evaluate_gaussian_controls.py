@@ -93,6 +93,54 @@ def _normalise_metadata(entry: Mapping[str, Any]) -> Dict[str, Any]:
     return metadata
 
 
+def _sampling_seed(
+    *,
+    base_sampling_seed: int,
+    entry: Mapping[str, Any],
+    batch_index: int,
+) -> int:
+    """Return a source-order-independent predictive-sampling seed."""
+    if "sampling_seed_offset" not in entry:
+        raise KeyError(
+            "Every metric_mode='sampled' source must define "
+            f"sampling_seed_offset; missing for {entry.get('name')!r}."
+        )
+
+    offset = int(entry["sampling_seed_offset"])
+    if offset < 1:
+        raise ValueError(
+            "sampling_seed_offset must be a positive integer; "
+            f"got {offset} for {entry.get('name')!r}."
+        )
+
+    return int(base_sampling_seed) + 1_000_000 * offset + int(batch_index)
+
+
+def _validate_sampling_seed_offsets(source_entries: List[Dict[str, Any]]) -> None:
+    sampled = [
+        entry
+        for entry in source_entries
+        if str(entry.get("metric_mode")) == "sampled"
+    ]
+    offsets = [int(entry.get("sampling_seed_offset", -1)) for entry in sampled]
+
+    if any(offset < 1 for offset in offsets):
+        missing = [
+            str(entry.get("name"))
+            for entry in sampled
+            if int(entry.get("sampling_seed_offset", -1)) < 1
+        ]
+        raise ValueError(
+            "Sampled sources require positive sampling_seed_offset values: "
+            f"{missing}."
+        )
+
+    if len(offsets) != len(set(offsets)):
+        raise ValueError(
+            "sampling_seed_offset values must be unique across sampled sources."
+        )
+
+
 def _load_learned_sources(
     *,
     source_entries: List[Dict[str, Any]],
@@ -241,6 +289,8 @@ def _assert_exact_gp_oracle_valid(
     batch: SyntheticBatch,
     mean: torch.Tensor,
     scale: torch.Tensor,
+    noise_std: float,
+    verbose: bool,
 ) -> None:
     expected_shape = tuple(batch.yt.shape)
 
@@ -266,12 +316,25 @@ def _assert_exact_gp_oracle_valid(
             "Exact-GP oracle returned a non-positive scale."
         )
 
-    print(
-        "Exact-GP oracle check PASS: "
-        "source=batch.gt_pred, "
-        f"min_scale={float(scale.min().item()):.3e}, "
-        f"max_scale={float(scale.max().item()):.3e}."
-    )
+    # The noisy predictive posterior satisfies scale >= noise_std everywhere.
+    # A violation means the oracle returned the noiseless function posterior,
+    # which would silently overstate every model's calibration deficit.
+    min_scale = float(scale.min().item())
+    if min_scale < float(noise_std) * (1.0 - 1.0e-3):
+        raise FloatingPointError(
+            "Exact-GP oracle scale fell below the observation-noise floor: "
+            f"min_scale={min_scale:.6e} < noise_std={float(noise_std):.6e}. "
+            "The oracle must include the Gaussian likelihood noise."
+        )
+
+    if verbose:
+        print(
+            "Exact-GP oracle check PASS: "
+            "source=batch.gt_pred, "
+            f"min_scale={min_scale:.3e}, "
+            f"max_scale={float(scale.max().item()):.3e}, "
+            f"noise_floor={float(noise_std):.3e}."
+        )
 
 
 def _sample_model(
@@ -427,6 +490,7 @@ def main() -> None:
 
     base_generator_config = str(cfg["base_generator_config"])
     source_entries = list(cfg["sources"])
+    _validate_sampling_seed_offsets(source_entries)
     interval_levels = tuple(float(x) for x in cfg.get("interval_levels", [0.90]))
 
     loaded_sources = _load_learned_sources(
@@ -478,10 +542,7 @@ def main() -> None:
         generator_config.generators.test.deterministic = True
         generator_config.generators.test.deterministic_seed = deterministic_seed
 
-        context_range = OmegaConf.to_container(
-            generator_config.params.context_range,
-            resolve=True,
-        )
+        generator_noise_std = float(generator_config.generators.test.noise_std)
 
         generator = instantiate(generator_config.generators.test)
         loader = torch.utils.data.DataLoader(
@@ -516,23 +577,33 @@ def main() -> None:
                     f"got {type(batch_cpu)}."
                 )
 
-            if batch_index == 0:
-                _validate_fixed_gp_batch(batch=batch_cpu, eval_set=eval_set)
+            _validate_fixed_gp_batch(batch=batch_cpu, eval_set=eval_set)
 
             fingerprints = task_fingerprints(batch_cpu)
             num_context = int(batch_cpu.xc.shape[1])
             batch = move_batch_to_device(batch_cpu, device)
 
             # The repository's canonical GP oracle and all learned models
-            # are evaluated on the same paired batch.
-            exact_entries = [
+            # are evaluated on the same paired batch. Exact-GP sources may be
+            # analytic (closed-form marginals) or sampled (an M-member draw
+            # from those marginals, scored with the same finite-ensemble
+            # estimators as the CRPS models) so that headline comparisons can
+            # be made under identical estimators.
+            exact_sources = [
                 item
                 for item in loaded_sources
                 if str(item["entry"].get("kind", "model")) == "exact_gp"
             ]
-            if len(exact_entries) != 1:
+            if not exact_sources:
                 raise RuntimeError(
-                    "Gaussian controls require exactly one kind='exact_gp' source."
+                    "Gaussian controls require at least one kind='exact_gp' source."
+                )
+            if not any(
+                str(item["entry"]["metric_mode"]) == "analytic_gaussian"
+                for item in exact_sources
+            ):
+                raise RuntimeError(
+                    "Gaussian controls require an analytic exact-GP source."
                 )
 
             gp_mean, gp_std = _exact_gp_posterior_from_reference(
@@ -540,34 +611,79 @@ def main() -> None:
                 device=device,
             )
 
-            if batch_index == 0:
-                _assert_exact_gp_oracle_valid(
-                    batch=batch_cpu,
-                    mean=gp_mean,
-                    scale=gp_std,
-                )
-
-            exact_entry = exact_entries[0]["entry"]
-            kernel_rows.extend(
-                per_task_rows_gaussian(
-                    loc=gp_mean,
-                    scale=gp_std,
-                    target=batch.yt,
-                    xt=batch.xt,
-                    context_range=context_range,
-                    task_index_start=task_index_start,
-                    generator_batch_index=batch_index,
-                    fingerprints=fingerprints,
-                    model_name=str(exact_entry["name"]),
-                    source_kind="exact_gp",
-                    checkpoint_path="<exact_gp_oracle>",
-                    eval_set=eval_name,
-                    kernel_name=kernel_name,
-                    num_context=num_context,
-                    metadata=_normalise_metadata(exact_entry),
-                    interval_levels=interval_levels,
-                )
+            _assert_exact_gp_oracle_valid(
+                batch=batch_cpu,
+                mean=gp_mean,
+                scale=gp_std,
+                noise_std=generator_noise_std,
+                verbose=batch_index == 0,
             )
+
+            for exact_item in exact_sources:
+                exact_entry = exact_item["entry"]
+                exact_mode = str(exact_entry["metric_mode"])
+
+                if exact_mode == "analytic_gaussian":
+                    kernel_rows.extend(
+                        per_task_rows_gaussian(
+                            loc=gp_mean,
+                            scale=gp_std,
+                            target=batch.yt,
+                            xt=batch.xt,
+                            xc=batch.xc,
+                            task_index_start=task_index_start,
+                            generator_batch_index=batch_index,
+                            fingerprints=fingerprints,
+                            model_name=str(exact_entry["name"]),
+                            source_kind="exact_gp",
+                            checkpoint_path="<exact_gp_oracle>",
+                            eval_set=eval_name,
+                            kernel_name=kernel_name,
+                            num_context=num_context,
+                            metadata=_normalise_metadata(exact_entry),
+                            interval_levels=interval_levels,
+                        )
+                    )
+                elif exact_mode == "sampled":
+                    source_seed = _sampling_seed(
+                        base_sampling_seed=base_sampling_seed,
+                        entry=exact_entry,
+                        batch_index=batch_index,
+                    )
+                    pl.seed_everything(source_seed, workers=False)
+                    marginal_noise = torch.randn(
+                        (num_eval_samples,) + tuple(gp_mean.shape),
+                        device=gp_mean.device,
+                        dtype=gp_mean.dtype,
+                    )
+                    gp_samples = (
+                        gp_mean.unsqueeze(0)
+                        + gp_std.unsqueeze(0) * marginal_noise
+                    )
+                    kernel_rows.extend(
+                        per_task_rows_sampled(
+                            samples=gp_samples,
+                            target=batch.yt,
+                            xt=batch.xt,
+                            xc=batch.xc,
+                            task_index_start=task_index_start,
+                            generator_batch_index=batch_index,
+                            fingerprints=fingerprints,
+                            model_name=str(exact_entry["name"]),
+                            source_kind="exact_gp",
+                            checkpoint_path="<exact_gp_oracle_sampled>",
+                            eval_set=eval_name,
+                            kernel_name=kernel_name,
+                            num_context=num_context,
+                            metadata=_normalise_metadata(exact_entry),
+                            interval_levels=interval_levels,
+                        )
+                    )
+                else:
+                    raise ValueError(
+                        f"Unknown metric_mode={exact_mode!r} for "
+                        f"{exact_entry['name']!r}."
+                    )
 
             for loaded in loaded_sources:
                 entry = loaded["entry"]
@@ -577,13 +693,13 @@ def main() -> None:
                 model = loaded["model"]
                 assert model is not None
 
-                # Batch- and source-specific seed makes sampling reproducible and
-                # independent of source ordering while leaving cached tasks intact.
-                source_seed = (
-                    base_sampling_seed
-                    + 1_000_000 * int(loaded["source_index"])
-                    + batch_index
-                )
+                # Explicit per-source offsets keep predictive Monte Carlo
+                # reproducible even if sources are reordered or diagnostics are added.
+                source_seed = _sampling_seed(
+                    base_sampling_seed=base_sampling_seed,
+                    entry=entry,
+                    batch_index=batch_index,
+                ) if str(entry["metric_mode"]) == "sampled" else base_sampling_seed
                 pl.seed_everything(source_seed, workers=False)
 
                 metric_mode = str(entry["metric_mode"])
@@ -599,7 +715,7 @@ def main() -> None:
                         scale=scale,
                         target=batch.yt,
                         xt=batch.xt,
-                        context_range=context_range,
+                        xc=batch.xc,
                         task_index_start=task_index_start,
                         generator_batch_index=batch_index,
                         fingerprints=fingerprints,
@@ -623,7 +739,7 @@ def main() -> None:
                         samples=samples,
                         target=batch.yt,
                         xt=batch.xt,
-                        context_range=context_range,
+                        xc=batch.xc,
                         task_index_start=task_index_start,
                         generator_batch_index=batch_index,
                         fingerprints=fingerprints,

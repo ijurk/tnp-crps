@@ -12,10 +12,29 @@ import pandas as pd
 
 MODEL_ORDER = [
     "Exact GP oracle",
+    "Exact GP oracle (M=64)",
     "Gaussian TNP",
+    "Gaussian TNP (M=64)",
     "Dropout CRPS-TNP",
     "StochLN CRPS-TNP",
 ]
+
+# Headline deltas compare finite-ensemble sources under identical estimators,
+# so the sampled Gaussian TNP is the reference. The analytic rows remain as
+# the estimator-bias diagnostic via FINITE_M_TWIN_PAIRS.
+DELTA_REFERENCE = "Gaussian TNP (M=64)"
+
+FINITE_M_TWIN_PAIRS = [
+    ("Exact GP oracle", "Exact GP oracle (M=64)"),
+    ("Gaussian TNP", "Gaussian TNP (M=64)"),
+]
+
+HEADLINE_MODEL_LABELS = {
+    "Exact GP oracle (M=64)": "Exact GP oracle",
+    "Gaussian TNP (M=64)": "Gaussian TNP",
+    "Dropout CRPS-TNP": "Dropout CRPS-TNP",
+    "StochLN CRPS-TNP": "StochLN CRPS-TNP",
+}
 
 METRICS = [
     "rmse",
@@ -324,7 +343,7 @@ def paired_cluster_bootstrap(
     point = macro.set_index("model_name")
     ci_rows: List[Dict[str, float]] = []
     delta_rows: List[Dict[str, float]] = []
-    reference_index = models.index("Gaussian TNP")
+    reference_index = models.index(DELTA_REFERENCE)
 
     for model_index, model_name in enumerate(models):
         for metric in METRICS:
@@ -341,16 +360,16 @@ def paired_cluster_bootstrap(
                 }
             )
 
-            if model_name != "Gaussian TNP":
+            if model_name != DELTA_REFERENCE:
                 delta = values - boot[metric][:, reference_index]
                 estimate_delta = float(
                     point.loc[model_name, metric]
-                    - point.loc["Gaussian TNP", metric]
+                    - point.loc[DELTA_REFERENCE, metric]
                 )
                 delta_rows.append(
                     {
                         "model_name": model_name,
-                        "reference_model": "Gaussian TNP",
+                        "reference_model": DELTA_REFERENCE,
                         "metric": metric,
                         "estimate_delta": estimate_delta,
                         "ci_low": float(np.quantile(delta, 0.025)),
@@ -363,13 +382,71 @@ def paired_cluster_bootstrap(
                     }
                 )
 
+    # Finite-M estimator-bias diagnostic: the sampled twin minus its analytic
+    # counterpart, using the same bootstrap draws so the CI is paired.
+    for analytic_name, sampled_name in FINITE_M_TWIN_PAIRS:
+        analytic_index = models.index(analytic_name)
+        sampled_index = models.index(sampled_name)
+        for metric in METRICS:
+            delta = (
+                boot[metric][:, sampled_index]
+                - boot[metric][:, analytic_index]
+            )
+            delta_rows.append(
+                {
+                    "model_name": f"{sampled_name} minus {analytic_name}",
+                    "reference_model": analytic_name,
+                    "metric": metric,
+                    "estimate_delta": float(
+                        point.loc[sampled_name, metric]
+                        - point.loc[analytic_name, metric]
+                    ),
+                    "ci_low": float(np.quantile(delta, 0.025)),
+                    "ci_high": float(np.quantile(delta, 0.975)),
+                    "ci_contains_zero": bool(
+                        np.quantile(delta, 0.025) <= 0.0 <= np.quantile(delta, 0.975)
+                    ),
+                    "bootstrap_replicates": bootstrap_replicates,
+                    "bootstrap_unit": "generator_batch_within_kernel",
+                }
+            )
+
     return pd.DataFrame(ci_rows), pd.DataFrame(delta_rows)
 
 
-def _latex_table(macro: pd.DataFrame) -> str:
-    table = macro[
+def headline_summary(macro: pd.DataFrame) -> pd.DataFrame:
+    """Return the four M=64 rows used for the dissertation comparison."""
+    selected = macro.loc[
+        macro["model_name"].astype(str).isin(HEADLINE_MODEL_LABELS)
+    ].copy()
+    selected["model_name"] = selected["model_name"].astype(str)
+    selected["display_name"] = selected["model_name"].map(HEADLINE_MODEL_LABELS)
+
+    expected = list(HEADLINE_MODEL_LABELS)
+    found = selected["model_name"].tolist()
+    if set(found) != set(expected):
+        raise RuntimeError(
+            "Headline summary is missing sampled parity rows. "
+            f"Expected {expected}, found {found}."
+        )
+
+    order = {name: index for index, name in enumerate(expected)}
+    selected["_order"] = selected["model_name"].map(order)
+    return selected.sort_values("_order").drop(columns="_order").reset_index(drop=True)
+
+
+def finite_m_diagnostics(deltas: pd.DataFrame) -> pd.DataFrame:
+    labels = {
+        f"{sampled} minus {analytic}"
+        for analytic, sampled in FINITE_M_TWIN_PAIRS
+    }
+    return deltas.loc[deltas["model_name"].isin(labels)].reset_index(drop=True)
+
+
+def _latex_table(headline: pd.DataFrame) -> str:
+    table = headline[
         [
-            "model_name",
+            "display_name",
             "rmse",
             "crps",
             "spread_skill_ratio",
@@ -380,7 +457,7 @@ def _latex_table(macro: pd.DataFrame) -> str:
 
     table = table.rename(
         columns={
-            "model_name": "Model",
+            "display_name": "Model",
             "rmse": r"RMSE $\downarrow$",
             "crps": r"CRPS $\downarrow$",
             "spread_skill_ratio": r"SSR $\to 1$",
@@ -395,7 +472,8 @@ def _latex_table(macro: pd.DataFrame) -> str:
         float_format=lambda value: f"{value:.4f}",
         column_format="lccccc",
         caption=(
-            "Gaussian-control performance, macro-averaged over the five "
+            "Gaussian-control performance using M=64 sampled predictive "
+            "ensembles for all four sources, macro-averaged over the five "
             "fixed-hyperparameter GP kernels."
         ),
         label="tab:gaussian_controls",
@@ -438,14 +516,18 @@ def main() -> None:
         bootstrap_replicates=int(args.bootstrap_replicates),
         bootstrap_seed=int(args.bootstrap_seed),
     )
+    headline = headline_summary(macro)
+    finite_m = finite_m_diagnostics(deltas)
 
     by_kernel.to_csv(output_dir / "summary_by_kernel.csv", index=False)
     macro.to_csv(output_dir / "summary_macro.csv", index=False)
+    headline.to_csv(output_dir / "summary_macro_headline.csv", index=False)
+    finite_m.to_csv(output_dir / "finite_m_twin_diagnostics.csv", index=False)
     pooled.to_csv(output_dir / "summary_pooled.csv", index=False)
     ci.to_csv(output_dir / "bootstrap_metric_ci.csv", index=False)
     deltas.to_csv(output_dir / "paired_cluster_bootstrap_deltas.csv", index=False)
 
-    latex = _latex_table(macro)
+    latex = _latex_table(headline)
     (output_dir / "gaussian_controls_table.tex").write_text(latex)
 
     metadata = {
@@ -458,11 +540,11 @@ def main() -> None:
     }
     (output_dir / "analysis_config.json").write_text(json.dumps(metadata, indent=2))
 
-    print("\nMAIN MACRO-AVERAGED TABLE\n")
+    print("\nHEADLINE M=64 MACRO-AVERAGED TABLE\n")
     print(
-        macro[
+        headline[
             [
-                "model_name",
+                "display_name",
                 "rmse",
                 "crps",
                 "spread_skill_ratio",
@@ -472,9 +554,17 @@ def main() -> None:
         ].to_string(index=False, float_format=lambda x: f"{x:.6f}")
     )
 
-    print("\nPAIRED CLUSTER-BOOTSTRAP CRPS DIFFERENCES VS GAUSSIAN TNP\n")
+    print("\nPAIRED CLUSTER-BOOTSTRAP CRPS DIFFERENCES VS GAUSSIAN TNP (M=64)\n")
     print(
         deltas.loc[deltas["metric"] == "crps"].to_string(
+            index=False,
+            float_format=lambda x: f"{x:.6f}",
+        )
+    )
+
+    print("\nFINITE-M TWIN DIAGNOSTICS\n")
+    print(
+        finite_m.to_string(
             index=False,
             float_format=lambda x: f"{x:.6f}",
         )

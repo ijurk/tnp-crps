@@ -1,7 +1,7 @@
 # Section 4.1: fixed-hyperparameter Gaussian controls.
 # Headline evaluation: 5 kernels x 8,000 paired tasks = 40,000 tasks.
 
-output_dir: results/synthetic_1d/gaussian_controls_final_20260802_v1
+output_dir: results/synthetic_1d/gaussian_controls_final_20260802_v2
 base_generator_config: external/tnp/experiments/configs/generators/synthetic-1d.yml
 device: cuda
 
@@ -21,6 +21,16 @@ sources:
       training_p_dropout: null
       training_layernorm_noise_dim: null
 
+  - name: Exact GP oracle (M=64)
+    kind: exact_gp
+    metric_mode: sampled
+    sampling_seed_offset: 1
+    metadata:
+      training_alpha: null
+      training_num_samples: null
+      training_p_dropout: null
+      training_layernorm_noise_dim: null
+
   - name: Gaussian TNP
     kind: model
     metric_mode: analytic_gaussian
@@ -33,9 +43,23 @@ sources:
       training_p_dropout: null
       training_layernorm_noise_dim: null
 
+  - name: Gaussian TNP (M=64)
+    kind: model
+    metric_mode: sampled
+    sampling_seed_offset: 2
+    model_config: external/tnp/experiments/configs/models/tnp_lr_scheduler.yml
+    checkpoint_path: checkpoints/baseline_tnp_full/synthetic-1d-regression/TNP-L5-H8-D128/baseline-full-29842761/last.ckpt
+    overrides: []
+    metadata:
+      training_alpha: null
+      training_num_samples: null
+      training_p_dropout: null
+      training_layernorm_noise_dim: null
+
   - name: Dropout CRPS-TNP
     kind: model
     metric_mode: sampled
+    sampling_seed_offset: 3
     model_config: experiments/configs/models/tnp_crps_dropout.yml
     checkpoint_path: checkpoints/crps_tnp_dropout_full/synthetic-1d-regression/TNP-CRPS-Dropout-L5-H8-D128/full-m4-p010-simpson-20260801-v2/last.ckpt
     overrides:
@@ -51,6 +75,7 @@ sources:
   - name: StochLN CRPS-TNP
     kind: model
     metric_mode: sampled
+    sampling_seed_offset: 4
     model_config: experiments/configs/models/tnp_crps_stochln.yml
     checkpoint_path: checkpoints/crps_tnp_layernorm_full/synthetic-1d-regression/TNP-CRPS-StochLN-L5-H8-D128/full-m4-30048977/last.ckpt
     overrides:
@@ -123,6 +148,10 @@ eval_sets:
       - params.max_log10_period=0.3010299956639812
 
 figure:
+  source_names:
+    - Gaussian TNP
+    - Dropout CRPS-TNP
+    - StochLN CRPS-TNP
   eval_set: matern32
   deterministic_seed: 20260823
   resample_seed: 20260824
