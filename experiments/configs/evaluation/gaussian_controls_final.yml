@@ -1,0 +1,144 @@
+# Section 4.1: fixed-hyperparameter Gaussian controls.
+# Headline evaluation: 5 kernels x 8,000 paired tasks = 40,000 tasks.
+
+output_dir: results/synthetic_1d/gaussian_controls_final_20260802_v1
+base_generator_config: external/tnp/experiments/configs/generators/synthetic-1d.yml
+device: cuda
+
+samples_per_eval_set: 8000
+eval_batch_size: 16
+num_eval_samples: 64
+interval_levels: [0.90]
+max_batches: null
+
+sources:
+  - name: Exact GP oracle
+    kind: exact_gp
+    metric_mode: analytic_gaussian
+    metadata:
+      training_alpha: null
+      training_num_samples: null
+      training_p_dropout: null
+      training_layernorm_noise_dim: null
+
+  - name: Gaussian TNP
+    kind: model
+    metric_mode: analytic_gaussian
+    model_config: external/tnp/experiments/configs/models/tnp_lr_scheduler.yml
+    checkpoint_path: checkpoints/baseline_tnp_full/synthetic-1d-regression/TNP-L5-H8-D128/baseline-full-29842761/last.ckpt
+    overrides: []
+    metadata:
+      training_alpha: null
+      training_num_samples: null
+      training_p_dropout: null
+      training_layernorm_noise_dim: null
+
+  - name: Dropout CRPS-TNP
+    kind: model
+    metric_mode: sampled
+    model_config: experiments/configs/models/tnp_crps_dropout.yml
+    checkpoint_path: checkpoints/crps_tnp_dropout_full/synthetic-1d-regression/TNP-CRPS-Dropout-L5-H8-D128/full-m4-p010-simpson-20260801-v2/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.p_dropout=0.10
+      - params.crps_alpha=1.0
+    metadata:
+      training_alpha: 1.0
+      training_num_samples: 4
+      training_p_dropout: 0.10
+      training_layernorm_noise_dim: null
+
+  - name: StochLN CRPS-TNP
+    kind: model
+    metric_mode: sampled
+    model_config: experiments/configs/models/tnp_crps_stochln.yml
+    checkpoint_path: checkpoints/crps_tnp_layernorm_full/synthetic-1d-regression/TNP-CRPS-StochLN-L5-H8-D128/full-m4-30048977/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.crps_alpha=1.0
+      - params.layernorm_noise_dim=32
+    metadata:
+      training_alpha: 1.0
+      training_num_samples: 4
+      training_p_dropout: 0.0
+      training_layernorm_noise_dim: 32
+
+# Fixed lengthscale l=0.5 lies inside the training range [approximately 0.25, 1].
+# The periodic kernel additionally uses period 2.0.
+eval_sets:
+  - name: rbf
+    kernel: rbf_kernel
+    deterministic_seed: 20260811
+    sampling_seed: 20261811
+    expected_lengthscale: 0.5
+    overrides:
+      - params.min_log10_lengthscale=-0.3010299956639812
+      - params.max_log10_lengthscale=-0.3010299956639812
+      - params.min_log10_period=0.3010299956639812
+      - params.max_log10_period=0.3010299956639812
+
+  - name: matern12
+    kernel: matern12_kernel
+    deterministic_seed: 20260812
+    sampling_seed: 20261812
+    expected_lengthscale: 0.5
+    overrides:
+      - params.min_log10_lengthscale=-0.3010299956639812
+      - params.max_log10_lengthscale=-0.3010299956639812
+      - params.min_log10_period=0.3010299956639812
+      - params.max_log10_period=0.3010299956639812
+
+  - name: matern32
+    kernel: matern32_kernel
+    deterministic_seed: 20260813
+    sampling_seed: 20261813
+    expected_lengthscale: 0.5
+    overrides:
+      - params.min_log10_lengthscale=-0.3010299956639812
+      - params.max_log10_lengthscale=-0.3010299956639812
+      - params.min_log10_period=0.3010299956639812
+      - params.max_log10_period=0.3010299956639812
+
+  - name: matern52
+    kernel: matern52_kernel
+    deterministic_seed: 20260814
+    sampling_seed: 20261814
+    expected_lengthscale: 0.5
+    overrides:
+      - params.min_log10_lengthscale=-0.3010299956639812
+      - params.max_log10_lengthscale=-0.3010299956639812
+      - params.min_log10_period=0.3010299956639812
+      - params.max_log10_period=0.3010299956639812
+
+  - name: periodic
+    kernel: periodic_kernel
+    deterministic_seed: 20260815
+    sampling_seed: 20261815
+    expected_lengthscale: 0.5
+    expected_period: 2.0
+    overrides:
+      - params.min_log10_lengthscale=-0.3010299956639812
+      - params.max_log10_lengthscale=-0.3010299956639812
+      - params.min_log10_period=0.3010299956639812
+      - params.max_log10_period=0.3010299956639812
+
+figure:
+  eval_set: matern32
+  deterministic_seed: 20260823
+  resample_seed: 20260824
+  sampling_seed: 20260825
+  search_batches: 512
+  min_nc: 20
+  max_nc: 28
+  qualifying_task_index: 0
+  x_range: [-4.0, 4.0]
+  num_dense_points: 401
+  num_direct_samples: 64
+  num_ar_samples: 32
+  num_ar_anchors: 32
+  training_max_nc: 64
+  ar_anchor_range: [-4.0, 4.0]
+  target_order: ascending
+  stochln_noise_mode: refresh
+  num_denoise_samples: 32
+  visible_paths: 8
