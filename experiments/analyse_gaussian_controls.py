@@ -12,9 +12,9 @@ import pandas as pd
 
 MODEL_ORDER = [
     "Exact GP oracle",
-    "Exact GP oracle (M=64)",
+    "Exact GP oracle (M=256)",
     "Gaussian TNP",
-    "Gaussian TNP (M=64)",
+    "Gaussian TNP (M=256)",
     "Dropout CRPS-TNP",
     "StochLN CRPS-TNP",
 ]
@@ -22,16 +22,16 @@ MODEL_ORDER = [
 # Headline deltas compare finite-ensemble sources under identical estimators,
 # so the sampled Gaussian TNP is the reference. The analytic rows remain as
 # the estimator-bias diagnostic via FINITE_M_TWIN_PAIRS.
-DELTA_REFERENCE = "Gaussian TNP (M=64)"
+DELTA_REFERENCE = "Gaussian TNP (M=256)"
 
 FINITE_M_TWIN_PAIRS = [
-    ("Exact GP oracle", "Exact GP oracle (M=64)"),
-    ("Gaussian TNP", "Gaussian TNP (M=64)"),
+    ("Exact GP oracle", "Exact GP oracle (M=256)"),
+    ("Gaussian TNP", "Gaussian TNP (M=256)"),
 ]
 
 HEADLINE_MODEL_LABELS = {
-    "Exact GP oracle (M=64)": "Exact GP oracle",
-    "Gaussian TNP (M=64)": "Gaussian TNP",
+    "Exact GP oracle (M=256)": "Exact GP oracle",
+    "Gaussian TNP (M=256)": "Gaussian TNP",
     "Dropout CRPS-TNP": "Dropout CRPS-TNP",
     "StochLN CRPS-TNP": "StochLN CRPS-TNP",
 }
@@ -415,7 +415,7 @@ def paired_cluster_bootstrap(
 
 
 def headline_summary(macro: pd.DataFrame) -> pd.DataFrame:
-    """Return the four M=64 rows used for the dissertation comparison."""
+    """Return the four M=256 rows used for the dissertation comparison."""
     selected = macro.loc[
         macro["model_name"].astype(str).isin(HEADLINE_MODEL_LABELS)
     ].copy()
@@ -472,7 +472,7 @@ def _latex_table(headline: pd.DataFrame) -> str:
         float_format=lambda value: f"{value:.4f}",
         column_format="lccccc",
         caption=(
-            "Gaussian-control performance using M=64 sampled predictive "
+            "Gaussian-control performance using M=256 sampled predictive "
             "ensembles for all four sources, macro-averaged over the five "
             "fixed-hyperparameter GP kernels."
         ),
@@ -540,7 +540,7 @@ def main() -> None:
     }
     (output_dir / "analysis_config.json").write_text(json.dumps(metadata, indent=2))
 
-    print("\nHEADLINE M=64 MACRO-AVERAGED TABLE\n")
+    print("\nHEADLINE M=256 MACRO-AVERAGED TABLE\n")
     print(
         headline[
             [
@@ -554,7 +554,7 @@ def main() -> None:
         ].to_string(index=False, float_format=lambda x: f"{x:.6f}")
     )
 
-    print("\nPAIRED CLUSTER-BOOTSTRAP CRPS DIFFERENCES VS GAUSSIAN TNP (M=64)\n")
+    print("\nPAIRED CLUSTER-BOOTSTRAP CRPS DIFFERENCES VS GAUSSIAN TNP (M=256)\n")
     print(
         deltas.loc[deltas["metric"] == "crps"].to_string(
             index=False,

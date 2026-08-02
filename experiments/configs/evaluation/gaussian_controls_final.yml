@@ -7,7 +7,8 @@ device: cuda
 
 samples_per_eval_set: 8000
 eval_batch_size: 16
-num_eval_samples: 64
+num_eval_samples: 256
+sample_chunk_size: 64
 interval_levels: [0.90]
 max_batches: null
 
@@ -21,7 +22,7 @@ sources:
       training_p_dropout: null
       training_layernorm_noise_dim: null
 
-  - name: Exact GP oracle (M=64)
+  - name: Exact GP oracle (M=256)
     kind: exact_gp
     metric_mode: sampled
     sampling_seed_offset: 1
@@ -43,7 +44,7 @@ sources:
       training_p_dropout: null
       training_layernorm_noise_dim: null
 
-  - name: Gaussian TNP (M=64)
+  - name: Gaussian TNP (M=256)
     kind: model
     metric_mode: sampled
     sampling_seed_offset: 2

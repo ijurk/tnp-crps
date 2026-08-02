@@ -18,7 +18,7 @@ This bundle adds **new files only**. It does not replace the existing generic ev
 - Observation noise remains `0.1` through the existing generator.
 - 8,000 tasks per kernel, batch size 16, 40,000 tasks total.
 - Exact GP oracle and Gaussian TNP are each evaluated twice: analytically
-  (closed-form Gaussian marginal metrics) and as an M=64 sampled twin scored
+  (closed-form Gaussian marginal metrics) and as an M=256 sampled twin scored
   with exactly the same finite-ensemble estimators as the CRPS models.
 - Headline comparisons use the sampled rows for all four comparators; the
   analytic-minus-sampled twin deltas quantify the finite-M estimator bias

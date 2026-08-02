@@ -43,6 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--samples_per_eval_set", default=None, type=int)
     parser.add_argument("--eval_batch_size", default=None, type=int)
     parser.add_argument("--num_eval_samples", default=None, type=int)
+    parser.add_argument("--sample_chunk_size", default=None, type=int)
     parser.add_argument("--max_batches", default=None, type=int)
     parser.add_argument(
         "--overwrite",
@@ -337,19 +338,69 @@ def _assert_exact_gp_oracle_valid(
         )
 
 
+@torch.no_grad()
 def _sample_model(
     *,
     model: torch.nn.Module,
     batch: SyntheticBatch,
     num_eval_samples: int,
+    sample_chunk_size: int,
 ) -> torch.Tensor:
-    if isinstance(model, DirectTNP):
-        samples = model.sample(
-            xc=batch.xc,
-            yc=batch.yc,
-            xt=batch.xt,
-            num_samples=num_eval_samples,
+    """Generate predictive samples without materialising every stochastic
+    forward pass in one expanded batch.
+
+    Chunking changes only the computational batching. The returned tensor
+    still contains exactly num_eval_samples draws and is evaluated using
+    the same finite-ensemble estimators.
+    """
+    num_eval_samples = int(num_eval_samples)
+    sample_chunk_size = int(sample_chunk_size)
+
+    if num_eval_samples < 2:
+        raise ValueError(
+            f"num_eval_samples must be at least two, got {num_eval_samples}."
         )
+
+    if sample_chunk_size < 2:
+        raise ValueError(
+            f"sample_chunk_size must be at least two, got {sample_chunk_size}."
+        )
+
+    if isinstance(model, DirectTNP):
+        chunks = []
+        remaining = num_eval_samples
+
+        while remaining > 0:
+            # DirectTNP.sample currently requires at least two samples.
+            # In the unlikely event of a final one-sample remainder, request
+            # two samples and retain only the first.
+            retained_size = min(sample_chunk_size, remaining)
+            requested_size = max(2, retained_size)
+
+            chunk = model.sample(
+                xc=batch.xc,
+                yc=batch.yc,
+                xt=batch.xt,
+                num_samples=requested_size,
+            )
+
+            expected_chunk = (
+                requested_size,
+                batch.yt.shape[0],
+                batch.yt.shape[1],
+                batch.yt.shape[2],
+            )
+            if tuple(chunk.shape) != expected_chunk:
+                raise ValueError(
+                    "Predictive sample chunk has wrong shape. "
+                    f"Expected {expected_chunk}, got {tuple(chunk.shape)}."
+                )
+
+            chunks.append(chunk[:retained_size])
+            remaining -= retained_size
+
+        samples = torch.cat(chunks, dim=0)
+
     else:
         pred_dist = np_pred_fn(
             model=model,
@@ -369,8 +420,11 @@ def _sample_model(
             f"Predictive samples have wrong shape. Expected {expected}, "
             f"got {tuple(samples.shape)}."
         )
+
     if not torch.isfinite(samples).all():
-        raise FloatingPointError("Predictive samples contain non-finite values.")
+        raise FloatingPointError(
+            "Predictive samples contain non-finite values."
+        )
 
     return samples
 
@@ -474,6 +528,11 @@ def main() -> None:
         if args.num_eval_samples is not None
         else cfg["num_eval_samples"]
     )
+    sample_chunk_size = int(
+        args.sample_chunk_size
+        if args.sample_chunk_size is not None
+        else cfg.get("sample_chunk_size", num_eval_samples)
+    )
     max_batches = (
         args.max_batches
         if args.max_batches is not None
@@ -487,6 +546,8 @@ def main() -> None:
         )
     if num_eval_samples < 2:
         raise ValueError("num_eval_samples must be at least two.")
+    if sample_chunk_size < 2:
+        raise ValueError("sample_chunk_size must be at least two.")
 
     base_generator_config = str(cfg["base_generator_config"])
     source_entries = list(cfg["sources"])
@@ -507,6 +568,7 @@ def main() -> None:
             "samples_per_eval_set": samples_per_eval_set,
             "eval_batch_size": eval_batch_size,
             "num_eval_samples": num_eval_samples,
+            "sample_chunk_size": sample_chunk_size,
             "max_batches": max_batches,
             "runtime_metadata": runtime_metadata,
         }
@@ -734,6 +796,7 @@ def main() -> None:
                         model=model,
                         batch=batch,
                         num_eval_samples=num_eval_samples,
+                        sample_chunk_size=sample_chunk_size,
                     )
                     source_rows = per_task_rows_sampled(
                         samples=samples,
