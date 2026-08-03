@@ -626,6 +626,242 @@ class BinaryLatentForkGroundTruthPredictor(GroundTruthPredictor):
 
         return mean_y, var_y, cov_y, log_context_evidence
 
+    def posterior_marginal_components(
+        self,
+        *,
+        xc: torch.Tensor,
+        yc: torch.Tensor,
+        xt: torch.Tensor,
+        include_target_noise: bool = True,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return exact binary-mixture marginal components.
+
+        Returns:
+            component_means: [B, 2, Nt, 1], lower then upper.
+            component_scales: [B, 2, Nt, 1].
+            regime_weights: [B, 2].
+
+        This path avoids constructing a full Nt x Nt covariance matrix and is
+        therefore suitable for large marginal evaluations.
+        """
+        if xc.ndim != 3 or yc.ndim != 3 or xt.ndim != 3:
+            raise ValueError(
+                "Expected xc, yc and xt to be rank-3 tensors. "
+                f"Got xc={xc.shape}, yc={yc.shape}, xt={xt.shape}."
+            )
+        if xc.shape[0] != yc.shape[0] or xc.shape[0] != xt.shape[0]:
+            raise ValueError(
+                "xc, yc and xt must have matching batch dimensions. "
+                f"Got {xc.shape[0]}, {yc.shape[0]}, {xt.shape[0]}."
+            )
+        if xc.shape[-1] != 1 or xt.shape[-1] != 1 or yc.shape[-1] != 1:
+            raise ValueError(
+                "Binary latent fork marginal components require Dx=Dy=1."
+            )
+
+        old_device = xc.device
+        old_dtype = xc.dtype
+        batch_size = int(xc.shape[0])
+
+        fork_locations = self._fork_locations_for_batch(
+            batch_size=batch_size,
+            device=old_device,
+            dtype=old_dtype,
+        )
+
+        all_means = []
+        all_scales = []
+        all_weights = []
+
+        for task_index in range(batch_size):
+            task_means = []
+            task_log_evidence = []
+
+            xc_i = xc[task_index].to(dtype=torch.float64)
+            xt_i = xt[task_index].to(dtype=torch.float64)
+            yc_i = yc[task_index, :, 0].to(dtype=torch.float64)
+            fork_i = fork_locations[task_index].to(dtype=torch.float64).reshape(1)
+            num_context = int(xc_i.shape[0])
+
+            # The base-GP covariance does not depend on the latent branch. Reuse
+            # one context factorisation for both mixture components.
+            kcc = self._covariance(xc_i)
+            kct = self._covariance(xc_i, xt_i)
+            eye_c = torch.eye(
+                num_context,
+                device=old_device,
+                dtype=torch.float64,
+            )
+            kcc_obs = kcc + (self.noise_std**2 + self.jitter) * eye_c
+            chol_c = self._stable_cholesky(
+                kcc_obs,
+                context="posterior_marginal_components/kcc",
+                initial_jitter=self.jitter,
+            )
+            solve_kct = torch.cholesky_solve(kct, chol_c)
+
+            # Matérn covariance at zero separation equals base_scale^2. The
+            # conditional variance is identical under the two deterministic
+            # branch offsets.
+            var_base = self.base_scale**2 - (kct * solve_kct).sum(dim=0)
+            if include_target_noise:
+                var_base = var_base + self.noise_std**2
+            var_base = (var_base + self.jitter).clamp_min(self.jitter)
+
+            for regime_id in (0, 1):
+                regime = torch.tensor(
+                    [regime_id],
+                    device=old_device,
+                    dtype=torch.long,
+                )
+
+                context_offset = self.offsets_for_regimes(
+                    x=xc_i[None, :, :],
+                    fork_locations=fork_i,
+                    regimes=regime,
+                )[0, :, 0]
+                target_offset = self.offsets_for_regimes(
+                    x=xt_i[None, :, :],
+                    fork_locations=fork_i,
+                    regimes=regime,
+                )[0, :, 0]
+
+                centred_context = yc_i - context_offset
+                alpha = torch.cholesky_solve(
+                    centred_context[:, None],
+                    chol_c,
+                ).squeeze(-1)
+                mean_base = kct.transpose(-1, -2) @ alpha
+
+                task_means.append(mean_base + target_offset)
+                task_log_evidence.append(
+                    self._mvn_log_prob_from_cholesky(
+                        centred_context,
+                        chol_c,
+                    )
+                )
+
+            means = torch.stack(task_means, dim=0)
+            scales = var_base.sqrt().expand(2, -1).clone()
+            log_weights = torch.stack(task_log_evidence, dim=0) - math.log(2.0)
+            weights = torch.softmax(log_weights, dim=0)
+
+            all_means.append(means)
+            all_scales.append(scales)
+            all_weights.append(weights)
+
+        component_means = torch.stack(all_means, dim=0).unsqueeze(-1)
+        component_scales = torch.stack(all_scales, dim=0).unsqueeze(-1)
+        regime_weights = torch.stack(all_weights, dim=0)
+
+        return (
+            component_means.to(device=old_device, dtype=old_dtype),
+            component_scales.to(device=old_device, dtype=old_dtype),
+            regime_weights.to(device=old_device, dtype=old_dtype),
+        )
+
+    def predictive_marginal_samples(
+        self,
+        *,
+        xc: torch.Tensor,
+        yc: torch.Tensor,
+        xt: torch.Tensor,
+        num_samples: int,
+    ) -> torch.Tensor:
+        """Sample the exact univariate posterior marginals efficiently.
+
+        One global regime is drawn per task and ensemble member, preserving the
+        binary branch variable. Conditional residuals are sampled independently
+        across targets because this method is intended only for marginal scoring.
+        Use :meth:`predictive_samples` when joint GP path covariance is required.
+        """
+        num_samples = int(num_samples)
+        if num_samples < 1:
+            raise ValueError(f"num_samples must be >= 1, got {num_samples}.")
+
+        means, scales, weights = self.posterior_marginal_components(
+            xc=xc,
+            yc=yc,
+            xt=xt,
+            include_target_noise=True,
+        )
+
+        batch_size = int(xt.shape[0])
+        upper_probability = weights[:, 1].reshape(1, batch_size, 1, 1)
+        choose_upper = torch.rand(
+            num_samples,
+            batch_size,
+            1,
+            1,
+            device=xt.device,
+            dtype=xt.dtype,
+        ) < upper_probability
+
+        lower_mean = means[:, 0].unsqueeze(0)
+        upper_mean = means[:, 1].unsqueeze(0)
+        lower_scale = scales[:, 0].unsqueeze(0)
+        upper_scale = scales[:, 1].unsqueeze(0)
+
+        selected_mean = torch.where(choose_upper, upper_mean, lower_mean)
+        selected_scale = torch.where(choose_upper, upper_scale, lower_scale)
+
+        return selected_mean + selected_scale * torch.randn(
+            num_samples,
+            *xt.shape[:-1],
+            1,
+            device=xt.device,
+            dtype=xt.dtype,
+        )
+
+    def sample_paired_regime_observations(
+        self,
+        *,
+        x: torch.Tensor,
+    ) -> torch.Tensor:
+        """Sample paired lower/upper counterfactual observations.
+
+        The two regimes share the same base-GP realisation and observation-noise
+        draw, differing only through the deterministic branch offset. This makes
+        upper- and lower-reveal intervention tasks exactly paired.
+
+        Returns:
+            Tensor [B, 2, N, 1], ordered as lower then upper.
+        """
+        if x.ndim != 3 or x.shape[-1] != 1:
+            raise ValueError(f"Expected x [B, N, 1], got {x.shape}.")
+
+        batch_size = int(x.shape[0])
+        fork_locations = self._fork_locations_for_batch(
+            batch_size=batch_size,
+            device=x.device,
+            dtype=x.dtype,
+        )
+
+        base = self._base_latent_sample(x)
+        shared_noise = (
+            self.noise_std * torch.randn_like(base)
+            if self.noise_std > 0.0
+            else torch.zeros_like(base)
+        )
+
+        regimes = torch.arange(2, device=x.device, dtype=torch.long)
+        outputs = []
+        for regime_id in regimes.tolist():
+            regime_tensor = torch.full(
+                (batch_size,),
+                int(regime_id),
+                device=x.device,
+                dtype=torch.long,
+            )
+            offsets = self.offsets_for_regimes(
+                x=x,
+                fork_locations=fork_locations,
+                regimes=regime_tensor,
+            )
+            outputs.append(base + offsets + shared_noise)
+
+        return torch.stack(outputs, dim=1)
+
     def __call__(
         self,
         xc: torch.Tensor,
@@ -732,22 +968,19 @@ class BinaryLatentForkGroundTruthPredictor(GroundTruthPredictor):
         xt: torch.Tensor,
         num_samples: int = 128,
     ) -> torch.Tensor:
-        """Draw coherent oracle posterior samples.
+        """Draw coherent exact posterior paths efficiently.
 
-        A single z is sampled per full target set and sample path, not per
-        target point. This preserves coherent upper/lower futures.
-
-        Returns:
-            samples: [num_samples, B, Nt, 1]
+        One regime is sampled per complete target path. The full conditional GP
+        covariance is retained within that regime.
         """
-        if int(num_samples) < 1:
+        num_samples = int(num_samples)
+        if num_samples < 1:
             raise ValueError(f"num_samples must be >= 1, got {num_samples}.")
 
         old_device = xc.device
         old_dtype = xc.dtype
-
-        batch_size = xc.shape[0]
-        num_targets = xt.shape[1]
+        batch_size = int(xc.shape[0])
+        num_targets = int(xt.shape[1])
 
         fork_locations = self._fork_locations_for_batch(
             batch_size=batch_size,
@@ -755,8 +988,8 @@ class BinaryLatentForkGroundTruthPredictor(GroundTruthPredictor):
             dtype=old_dtype,
         )
 
-        samples = torch.empty(
-            int(num_samples),
+        output = torch.empty(
+            num_samples,
             batch_size,
             num_targets,
             1,
@@ -764,59 +997,66 @@ class BinaryLatentForkGroundTruthPredictor(GroundTruthPredictor):
             dtype=old_dtype,
         )
 
-        for b in range(batch_size):
-            comp_means = []
-            comp_covs = []
-            comp_log_evidence = []
+        for task_index in range(batch_size):
+            means = []
+            covariances = []
+            log_evidence = []
 
             for regime_id in (0, 1):
-                mean_y, _, cov_y, log_evidence = self._conditional_for_regime(
-                    xc_i=xc[b],
-                    yc_i=yc[b, :, 0],
-                    xt_i=xt[b],
-                    fork_location_i=fork_locations[b],
+                mean_y, _, cov_y, evidence = self._conditional_for_regime(
+                    xc_i=xc[task_index],
+                    yc_i=yc[task_index, :, 0],
+                    xt_i=xt[task_index],
+                    fork_location_i=fork_locations[task_index],
                     regime_id=regime_id,
                     include_target_noise=True,
                 )
+                means.append(mean_y)
+                covariances.append(cov_y)
+                log_evidence.append(evidence)
 
-                comp_means.append(mean_y)
-                comp_covs.append(cov_y)
-                comp_log_evidence.append(log_evidence)
-
-            logw = torch.stack(comp_log_evidence, dim=0)
-            logw = logw - math.log(2.0)
-            weights = torch.softmax(logw, dim=0)
-
+            weights = torch.softmax(
+                torch.stack(log_evidence, dim=0) - math.log(2.0),
+                dim=0,
+            )
             chosen = torch.multinomial(
                 weights,
-                num_samples=int(num_samples),
+                num_samples=num_samples,
                 replacement=True,
             )
 
-            for s in range(int(num_samples)):
-                regime_id = int(chosen[s].item())
+            task_samples = torch.empty(
+                num_samples,
+                num_targets,
+                1,
+                device=old_device,
+                dtype=torch.float64,
+            )
 
-                mean_y = comp_means[regime_id]
-                cov_y = comp_covs[regime_id]
+            for regime_id in (0, 1):
+                selected = torch.nonzero(chosen == regime_id, as_tuple=False).reshape(-1)
+                if selected.numel() == 0:
+                    continue
 
                 chol = self._stable_cholesky(
-                    cov_y,
+                    covariances[regime_id],
                     context="predictive_samples/cov_y",
                     initial_jitter=self.jitter,
                 )
-
-                eps = torch.randn(
+                epsilon = torch.randn(
+                    int(selected.numel()),
                     num_targets,
                     1,
                     device=old_device,
                     dtype=chol.dtype,
                 )
+                mean = means[regime_id].reshape(1, num_targets, 1).to(chol.dtype)
+                draws = mean + torch.matmul(chol.unsqueeze(0), epsilon)
+                task_samples[selected] = draws
 
-                y = mean_y.reshape(-1, 1).to(dtype=chol.dtype) + chol @ eps
+            output[:, task_index] = task_samples.to(dtype=old_dtype)
 
-                samples[s, b, :, 0] = y[:, 0].to(dtype=old_dtype)
-
-        return samples
+        return output
 
 
 class BinaryLatentForkGeneratorBase(SyntheticGenerator):

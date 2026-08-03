@@ -1,0 +1,78 @@
+# Sections 4.2.3--4.2.4: direct versus sparse-anchor AR coherence.
+output_dir: results/synthetic_1d/binary_fork_coherence_final_20260802_v1
+base_generator_config: experiments/configs/generators/binary_latent_fork_1d.yml
+device: cuda
+
+samples_per_eval_set: 4096
+eval_batch_size: 16
+num_paths: 50
+max_batches: null
+
+fork_x0: 0.0
+delta: 2.0
+noise_std: 0.05
+branch_start: 0.5
+gap_half_width_fraction: 0.25
+
+num_ar_anchors: 16
+ar_anchor_range: [0.1, 4.0]
+target_order: random
+stochln_noise_mode: refresh
+training_max_nc: 64
+direct_chunk_size: 50
+
+deterministic_seed: 20260844
+sampling_seed: 20261844
+
+sources:
+  - name: Exact joint oracle
+    kind: oracle
+    sampling_seed_offset: 1
+    metadata:
+      training_group: oracle
+
+  - name: Gaussian TNP
+    kind: model
+    sampling_seed_offset: 2
+    model_config: external/tnp/experiments/configs/models/tnp_lr_scheduler.yml
+    checkpoint_path: checkpoints/binary_latent_fork/synthetic-1d-binary-latent-fork/binary-latent-fork-gaussian-baseline/binary-latent-mixctx-v1/last.ckpt
+    overrides: []
+    metadata:
+      training_group: mixed_context
+      training_generator_config: experiments/configs/generators/binary_latent_fork_1d_mixctx.yml
+
+  - name: Dropout CRPS-TNP
+    kind: model
+    sampling_seed_offset: 3
+    model_config: experiments/configs/models/tnp_crps_dropout.yml
+    checkpoint_path: checkpoints/binary_latent_fork/synthetic-1d-binary-latent-fork/binary-latent-fork-dropout-m4-p010/binary-latent-mixctx-v1/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.val_num_samples=10
+      - params.test_num_samples=64
+      - params.p_dropout=0.10
+      - params.crps_alpha=1.0
+    metadata:
+      training_group: mixed_context
+      training_generator_config: experiments/configs/generators/binary_latent_fork_1d_mixctx.yml
+      training_alpha: 1.0
+      training_num_samples: 4
+      training_p_dropout: 0.10
+
+  - name: StochLN CRPS-TNP
+    kind: model
+    sampling_seed_offset: 4
+    model_config: experiments/configs/models/tnp_crps_stochln.yml
+    checkpoint_path: checkpoints/binary_latent_fork/synthetic-1d-binary-latent-fork/binary-latent-fork-stochln-m4/binary-latent-mixctx-v1/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.val_num_samples=10
+      - params.test_num_samples=64
+      - params.crps_alpha=1.0
+      - params.layernorm_noise_dim=32
+    metadata:
+      training_group: mixed_context
+      training_generator_config: experiments/configs/generators/binary_latent_fork_1d_mixctx.yml
+      training_alpha: 1.0
+      training_num_samples: 4
+      training_layernorm_noise_dim: 32
