@@ -1,0 +1,75 @@
+# Frozen qualitative-cache specification for Section 4.2 binary-fork figures.
+# Quantitative T1/T2/T3 outputs remain governed by their own final configs.
+
+device: cuda
+output_dir: results/dissertation_figures/binary_fork/caches
+
+marginals:
+  evaluation_config: experiments/configs/evaluation/latent_fork/binary_fork_marginals_final.yml
+  output_name: binary_fork_marginal_densities_cache_v1.pt
+
+  # Fixed, non-searched representative ambiguous task.
+  context_size: 16
+  deterministic_seed: 20260911
+  qualifying_task_index: 0
+  search_batches: 32
+
+  # Two fully post-transition locations.
+  probe_x: [0.5, 3.0]
+
+  # Figure-only Monte Carlo count for smooth one-task density estimates.
+  sampling_seed: 20261911
+  num_samples: 4096
+  sample_chunk_size: 64
+
+conditioning:
+  evaluation_config: experiments/configs/evaluation/latent_fork/binary_fork_conditioning_final.yml
+  output_name: binary_fork_conditioning_curves_cache_v1.pt
+
+  # Fixed, non-searched paired base task. Nc+1=17 remains inside the old
+  # checkpoints' max-Nc=32 training support.
+  context_size: 16
+  deterministic_seed: 20260912
+  qualifying_task_index: 0
+  search_batches: 32
+
+  counterfactual_seed: 20260913
+  inject_x: 1.0
+
+  # Branch identity is evaluated only where the two regimes are separated.
+  x_range: [0.5, 4.0]
+  num_grid_points: 141
+
+  sampling_seed: 20261912
+  num_samples: 2048
+  sample_chunk_size: 64
+
+coherence:
+  evaluation_config: experiments/configs/evaluation/latent_fork/binary_fork_coherence_final.yml
+  output_name: binary_fork_direct_vs_ar_cache_v1.pt
+
+  # Fixed, non-searched ambiguous task.
+  context_size: 16
+  deterministic_seed: 20260914
+  qualifying_task_index: 0
+  search_batches: 32
+
+  # Jointly resample finite task observations and the displayed dense truth.
+  resample_seed: 20260915
+
+  x_range: [-4.0, 4.0]
+  num_dense_points: 401
+
+  # Match the final T3 path count and AR protocol.
+  sampling_seed: 20261914
+  num_direct_samples: 50
+  direct_chunk_size: 50
+  num_ar_paths: 50
+  num_ar_anchors: 16
+  ar_anchor_range: [0.1, 4.0]
+  target_order: random
+  stochln_noise_mode: refresh
+
+  # Dense conditional-mean reconstruction used only for the qualitative figure.
+  num_denoise_samples: 32
+  denoise_chunk_size: 10
