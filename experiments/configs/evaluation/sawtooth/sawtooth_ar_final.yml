@@ -1,0 +1,91 @@
+output_dir: results/synthetic_1d/sawtooth_ar_final_20260803_v1
+refuse_overwrite: true
+device: cuda
+
+base_generator_config: experiments/configs/generators/sawtooth_1d_interpolation_curriculum.yml
+
+evaluation_mode: ar_anchors
+num_tasks: 4096
+num_ar_samples: 50
+eval_batch_size: 8
+eval_nc: 48
+num_ar_anchors: 16
+training_max_nc: 64
+ar_anchor_range:
+  - -2.0
+  - 2.0
+anchor_placement: uniform_random
+target_order: random
+stochln_noise_mode: refresh
+seed: 20260720
+anchor_seed: 20260720
+
+models:
+  - name: Gaussian curriculum
+    model_config: experiments/configs/models/tnp_fourier.yml
+    checkpoint_path: checkpoints/sawtooth_context_curriculum/synthetic-1d-sawtooth-interpolation/sawtooth-gaussian-fourier-context-curriculum/sawtooth-gaussian-fourier-context-curriculum-seed1-v1/last.ckpt
+    overrides: []
+
+  - name: Dropout curriculum
+    model_config: experiments/configs/models/tnp_crps_dropout_fourier.yml
+    checkpoint_path: checkpoints/sawtooth_context_curriculum/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-context-curriculum/sawtooth-dropout-fourier-context-curriculum-seed1-v1/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.p_dropout=0.10
+      - params.crps_alpha=1.0
+      - model.use_mc_dropout=true
+
+  - name: StochLN curriculum
+    model_config: experiments/configs/models/tnp_crps_stochln_fourier.yml
+    checkpoint_path: checkpoints/sawtooth_context_curriculum/synthetic-1d-sawtooth-interpolation/sawtooth-stochln-fourier-context-curriculum/sawtooth-stochln-fourier-context-curriculum-seed1-v1/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.crps_alpha=1.0
+      - params.layernorm_noise_dim=32
+
+analysis:
+  bootstrap_seed: 20260913
+  source_order:
+    - Gaussian curriculum
+    - Dropout curriculum
+    - StochLN curriculum
+    - Trivial U(0,1)
+  learned_sources:
+    - Gaussian curriculum
+    - Dropout curriculum
+    - StochLN curriculum
+  display_names:
+    Gaussian curriculum: Gaussian TNP
+    Dropout curriculum: Dropout CRPS-TNP
+    StochLN curriculum: StochLN CRPS-TNP
+    Trivial U(0,1): Trivial $U(0,1)$
+  references:
+    - Trivial U(0,1)
+    - Gaussian curriculum
+  bootstrap_metrics:
+    - rmse
+    - crps
+    - energy
+    - coverage90
+    - width90
+    - runtime_s_per_task
+  figure_task_quantiles:
+    representative: 0.50
+    difficult: 0.90
+  table:
+    filename: sawtooth_ar_table.tex
+    label: sawtooth_ar
+    columns:
+      - rmse
+      - crps
+      - energy
+      - coverage90
+      - width90
+      - runtime_s_per_task
+    column_labels:
+      rmse: RMSE $\downarrow$
+      crps: CRPS $\downarrow$
+      energy: Energy $\downarrow$
+      coverage90: Coverage$_{90}$
+      width90: Width$_{90}$
+      runtime_s_per_task: Runtime/task (s)

@@ -1,0 +1,23 @@
+output_dir: results/dissertation_figures/sawtooth/caches
+device: cuda
+
+trajectories:
+  history_csv: results/sawtooth/trajectories_final_20260803_v1/sawtooth_trajectory_history.csv
+  summary_csv: results/sawtooth/trajectories_final_20260803_v1/sawtooth_trajectory_summary.csv
+  output_name: sawtooth_optimisation_trajectories_cache_v1.pt
+
+ar:
+  ar_config: experiments/configs/evaluation/sawtooth/sawtooth_ar_final.yml
+  selected_tasks_json: results/synthetic_1d/sawtooth_ar_final_20260803_v1/analysis/selected_figure_tasks.json
+  output_name: sawtooth_ar_examples_cache_v1.pt
+
+  # Figure-only Monte Carlo budget. The quantitative AR table uses 50 paths.
+  num_paths: 128
+  num_paths_smoke: 8
+  num_dense_points: 401
+  num_dense_points_smoke: 101
+  num_denoise_samples: 32
+  num_denoise_samples_smoke: 4
+  denoise_chunk_size: 8
+  sampling_seed: 20260873
+  x_range: [-2.0, 2.0]

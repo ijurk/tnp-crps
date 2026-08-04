@@ -1,0 +1,135 @@
+output_dir: results/synthetic_1d/sawtooth_marginals_final_20260803_v1
+device: cuda
+
+base_generator_config: experiments/configs/generators/sawtooth_1d_interpolation_curriculum.yml
+eval_set_name: sawtooth_nc48_64
+
+samples_per_eval_set: 80000
+eval_batch_size: 16
+num_eval_samples: 256
+sample_chunk_size: 64
+
+deterministic_seed: 20260851
+sampling_seed: 20260852
+
+sawtooth:
+  min_freq: 2.0
+  max_freq: 4.0
+  noise_std: 0.0
+
+test_generator:
+  # Common one-shot test distribution for every source. This matches the
+  # endpoint support of the continuous context curriculum.
+  min_nc: 48
+  max_nc: 64
+  num_targets: 100
+
+sources:
+  - name: Trivial U(0,1)
+    kind: uniform
+    sampling_seed_offset: 1
+    metadata:
+      training_schedule: none
+      training_context: none
+      training_alpha: null
+
+  - name: Gaussian curriculum
+    kind: model
+    model_config: experiments/configs/models/tnp_fourier.yml
+    checkpoint_path: checkpoints/sawtooth_context_curriculum/synthetic-1d-sawtooth-interpolation/sawtooth-gaussian-fourier-context-curriculum/sawtooth-gaussian-fourier-context-curriculum-seed1-v1/last.ckpt
+    overrides: []
+    sampling_seed_offset: 2
+    metadata:
+      training_schedule: continuous_context_curriculum
+      training_context: 64 -> 56-64 -> 48-64
+      training_alpha: null
+
+  - name: Dropout curriculum
+    kind: model
+    model_config: experiments/configs/models/tnp_crps_dropout_fourier.yml
+    checkpoint_path: checkpoints/sawtooth_context_curriculum/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-context-curriculum/sawtooth-dropout-fourier-context-curriculum-seed1-v1/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.p_dropout=0.10
+      - params.crps_alpha=1.0
+      - model.use_mc_dropout=true
+    sampling_seed_offset: 3
+    metadata:
+      training_schedule: continuous_context_curriculum
+      training_context: 64 -> 56-64 -> 48-64
+      training_alpha: 1.0
+      training_num_samples: 4
+      training_p_dropout: 0.10
+
+  - name: StochLN curriculum
+    kind: model
+    model_config: experiments/configs/models/tnp_crps_stochln_fourier.yml
+    checkpoint_path: checkpoints/sawtooth_context_curriculum/synthetic-1d-sawtooth-interpolation/sawtooth-stochln-fourier-context-curriculum/sawtooth-stochln-fourier-context-curriculum-seed1-v1/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.crps_alpha=1.0
+      - params.layernorm_noise_dim=32
+    sampling_seed_offset: 4
+    metadata:
+      training_schedule: continuous_context_curriculum
+      training_context: 64 -> 56-64 -> 48-64
+      training_alpha: 1.0
+      training_num_samples: 4
+      training_layernorm_noise_dim: 32
+
+  - name: Dropout from scratch Nc48-64
+    kind: model
+    model_config: experiments/configs/models/tnp_crps_dropout_fourier.yml
+    checkpoint_path: checkpoints/sawtooth_context_ladder/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-nc48-64/sawtooth-dropout-fourier-nc48-64-v1/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.p_dropout=0.10
+      - params.crps_alpha=1.0
+      - model.use_mc_dropout=true
+    sampling_seed_offset: 5
+    metadata:
+      training_schedule: from_scratch
+      training_context: variable_48_64
+      training_alpha: 1.0
+      training_num_samples: 4
+      training_p_dropout: 0.10
+
+analysis:
+  output_prefix: sawtooth_headline
+  bootstrap_seed: 20260911
+  source_order:
+    - Trivial U(0,1)
+    - Gaussian curriculum
+    - Dropout curriculum
+    - StochLN curriculum
+    - Dropout from scratch Nc48-64
+  display_names:
+    Trivial U(0,1): Trivial $U(0,1)$
+    Gaussian curriculum: Gaussian TNP, curriculum
+    Dropout curriculum: Dropout CRPS-TNP, curriculum
+    StochLN curriculum: StochLN CRPS-TNP, curriculum
+    Dropout from scratch Nc48-64: Dropout CRPS-TNP, from scratch
+  references:
+    - Trivial U(0,1)
+    - Gaussian curriculum
+  bootstrap_metrics:
+    - rmse
+    - crps
+    - spread_skill_ratio
+    - coverage_90
+    - width_90
+  table:
+    filename: sawtooth_marginal_table.tex
+    label: sawtooth_marginals
+    columns:
+      - rmse
+      - crps
+      - spread_skill_ratio
+      - coverage_90
+      - width_90
+    column_labels:
+      rmse: RMSE $\downarrow$
+      crps: CRPS $\downarrow$
+      spread_skill_ratio: SSR
+      coverage_90: Coverage$_{90}$
+      width_90: Width$_{90}$

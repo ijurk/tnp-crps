@@ -1,0 +1,260 @@
+output_dir: results/sawtooth/trajectories_final_20260803_v1
+entity_env: WANDB_ENTITY
+project: synthetic-1d-sawtooth-interpolation
+api_timeout_seconds: 90
+
+escape:
+  rmse_threshold: 0.25
+  sustained_checks: 5
+  crps_threshold: 0.160
+
+runs:
+  - name: Gaussian raw x
+    panel: representation
+    run_name_contains:
+      - sawtooth-gaussian-raw
+    run_name_suffix: sawtooth-raw-v1
+    checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-gaussian-raw/sawtooth-raw-v1/last.ckpt
+    training_path: from_scratch
+    context_schedule: variable_1_30
+    min_nc: 1
+    max_nc: 30
+    validation_support: variable_1_30
+    alpha: null
+    expected_validation_points: 500
+    require_val_crps: false
+
+  - name: Gaussian Fourier
+    panel: representation
+    run_name_contains:
+      - sawtooth-gaussian-fourier
+    run_name_suffix: sawtooth-fourier-v1
+    checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-gaussian-fourier/sawtooth-fourier-v1/last.ckpt
+    training_path: from_scratch
+    context_schedule: variable_1_30
+    min_nc: 1
+    max_nc: 30
+    validation_support: variable_1_30
+    alpha: null
+    expected_validation_points: 500
+    require_val_crps: false
+
+  - name: Dropout variable Nc1-30
+    panel: context
+    run_name_contains:
+      - sawtooth-dropout-fourier-m4-p010
+    run_name_suffix: sawtooth-fourier-v1
+    checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-m4-p010/sawtooth-fourier-v1/last.ckpt
+    training_path: from_scratch
+    context_schedule: variable_1_30
+    min_nc: 1
+    max_nc: 30
+    validation_support: variable_1_30
+    alpha: 1.0
+    expected_validation_points: 500
+
+  - name: StochLN variable Nc1-30
+    panel: context
+    run_name_contains:
+      - sawtooth-stochln-fourier-m4
+    run_name_suffix: sawtooth-fourier-v1
+    checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-stochln-fourier-m4/sawtooth-fourier-v1/last.ckpt
+    training_path: from_scratch
+    context_schedule: variable_1_30
+    min_nc: 1
+    max_nc: 30
+    validation_support: variable_1_30
+    alpha: 1.0
+    expected_validation_points: 500
+
+  - name: Dropout variable Nc14-30 alpha1
+    panel: context
+    run_name_contains:
+      - sawtooth-dropout-fourier-nc14-30
+    run_name_suffix: sawtooth-dropout-fourier-nc14-30-v1
+    checkpoint_path: checkpoints/sawtooth_context_ladder/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-nc14-30/sawtooth-dropout-fourier-nc14-30-v1/last.ckpt
+    training_path: from_scratch
+    context_schedule: variable_14_30
+    min_nc: 14
+    max_nc: 30
+    validation_support: variable_14_30
+    alpha: 1.0
+    expected_validation_points: 500
+
+  - name: StochLN variable Nc14-30 alpha1
+    panel: context
+    run_name_contains:
+      - sawtooth-stochln-fourier-nc14-30
+    run_name_suffix: sawtooth-stochln-fourier-nc14-30-v1
+    checkpoint_path: checkpoints/sawtooth_context_ladder/synthetic-1d-sawtooth-interpolation/sawtooth-stochln-fourier-nc14-30/sawtooth-stochln-fourier-nc14-30-v1/last.ckpt
+    training_path: from_scratch
+    context_schedule: variable_14_30
+    min_nc: 14
+    max_nc: 30
+    validation_support: variable_14_30
+    alpha: 1.0
+    expected_validation_points: 500
+
+  - name: Dropout variable Nc14-30 alpha0.05
+    panel: loss
+    run_name_contains:
+      - sawtooth-dropout-fourier-nc14-30-alpha005
+    run_name_suffix: sawtooth-dropout-fourier-nc14-30-alpha005-v1
+    checkpoint_path: checkpoints/sawtooth_context_ladder/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-nc14-30-alpha005/sawtooth-dropout-fourier-nc14-30-alpha005-v1/last.ckpt
+    training_path: from_scratch
+    context_schedule: variable_14_30
+    min_nc: 14
+    max_nc: 30
+    validation_support: variable_14_30
+    alpha: 0.05
+    expected_validation_points: 500
+
+  - name: Dropout variable Nc48-64
+    panel: context
+    run_name_contains:
+      - sawtooth-dropout-fourier-nc48-64
+    run_name_suffix: sawtooth-dropout-fourier-nc48-64-v1
+    checkpoint_path: checkpoints/sawtooth_context_ladder/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-nc48-64/sawtooth-dropout-fourier-nc48-64-v1/last.ckpt
+    training_path: from_scratch
+    context_schedule: variable_48_64
+    min_nc: 48
+    max_nc: 64
+    validation_support: variable_48_64
+    alpha: 1.0
+    expected_validation_points: 500
+
+  - name: Dropout fixed Nc64
+    panel: context
+    run_name_contains:
+      - sawtooth-dropout-fourier-fixed-nc64
+    run_name_suffix: sawtooth-dropout-fourier-fixed-nc64-v1
+    checkpoint_path: checkpoints/sawtooth_context_ladder/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-fixed-nc64/sawtooth-dropout-fourier-fixed-nc64-v1/last.ckpt
+    training_path: from_scratch
+    context_schedule: fixed_64
+    min_nc: 64
+    max_nc: 64
+    validation_support: fixed_64
+    alpha: 1.0
+    expected_validation_points: 500
+
+  - name: Dropout fixed Nc96
+    panel: context
+    run_name_contains:
+      - sawtooth-dropout-fourier-fixed-nc96
+    run_name_suffix: sawtooth-dropout-fourier-fixed-nc96-v1
+    checkpoint_path: checkpoints/sawtooth_context_ladder/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-fixed-nc96/sawtooth-dropout-fourier-fixed-nc96-v1/last.ckpt
+    training_path: from_scratch
+    context_schedule: fixed_96
+    min_nc: 96
+    max_nc: 96
+    validation_support: fixed_96
+    alpha: 1.0
+    expected_validation_points: 500
+
+  - name: Dropout fixed Nc128
+    panel: context
+    run_name_contains:
+      - sawtooth-fourier-dropout-nc128
+    run_name_suffix: sawtooth-fourier-dropout-nc128-v1
+    checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-fourier-dropout-nc128/sawtooth-fourier-dropout-nc128-v1/last.ckpt
+    training_path: from_scratch
+    context_schedule: fixed_128
+    min_nc: 128
+    max_nc: 128
+    validation_support: fixed_128
+    alpha: 1.0
+    expected_validation_points: 500
+
+  - name: StochLN fixed Nc128
+    panel: context
+    run_name_contains:
+      - sawtooth-stochln-fourier-nc128
+    run_name_suffix: sawtooth-stochln-fourier-nc128-v1
+    checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-stochln-fourier-nc128/sawtooth-stochln-fourier-nc128-v1/last.ckpt
+    training_path: from_scratch
+    context_schedule: fixed_128
+    min_nc: 128
+    max_nc: 128
+    validation_support: fixed_128
+    alpha: 1.0
+    expected_validation_points: 500
+
+  - name: Gaussian continuous curriculum
+    panel: curriculum
+    run_name_contains:
+      - sawtooth-gaussian-fourier-context-curriculum
+    run_name_suffix: sawtooth-gaussian-fourier-context-curriculum-seed1-v1
+    checkpoint_path: checkpoints/sawtooth_context_curriculum/synthetic-1d-sawtooth-interpolation/sawtooth-gaussian-fourier-context-curriculum/sawtooth-gaussian-fourier-context-curriculum-seed1-v1/last.ckpt
+    training_path: continuous_context_curriculum
+    context_schedule: 64_to_56-64_to_48-64
+    validation_support: fixed_hard_48_64_for_all_epochs
+    alpha: null
+    expected_validation_points: 500
+    require_val_crps: false
+    stages: &continuous_stages
+      - name: stage1_nc64
+        start_epoch: 0
+        min_nc: 64
+        max_nc: 64
+      - name: stage2_nc56_64
+        start_epoch: 200
+        min_nc: 56
+        max_nc: 64
+      - name: stage3_nc48_64
+        start_epoch: 350
+        min_nc: 48
+        max_nc: 64
+
+  - name: Dropout continuous curriculum
+    panel: curriculum
+    run_name_contains:
+      - sawtooth-dropout-fourier-context-curriculum
+    run_name_suffix: sawtooth-dropout-fourier-context-curriculum-seed1-v1
+    checkpoint_path: checkpoints/sawtooth_context_curriculum/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-context-curriculum/sawtooth-dropout-fourier-context-curriculum-seed1-v1/last.ckpt
+    training_path: continuous_context_curriculum
+    context_schedule: 64_to_56-64_to_48-64
+    validation_support: fixed_hard_48_64_for_all_epochs
+    alpha: 1.0
+    expected_validation_points: 500
+    stages: *continuous_stages
+
+  - name: StochLN continuous curriculum
+    panel: curriculum
+    run_name_contains:
+      - sawtooth-stochln-fourier-context-curriculum
+    run_name_suffix: sawtooth-stochln-fourier-context-curriculum-seed1-v1
+    checkpoint_path: checkpoints/sawtooth_context_curriculum/synthetic-1d-sawtooth-interpolation/sawtooth-stochln-fourier-context-curriculum/sawtooth-stochln-fourier-context-curriculum-seed1-v1/last.ckpt
+    training_path: continuous_context_curriculum
+    context_schedule: 64_to_56-64_to_48-64
+    validation_support: fixed_hard_48_64_for_all_epochs
+    alpha: 1.0
+    expected_validation_points: 500
+    stages: *continuous_stages
+
+  - name: Dropout pretrain-finetune alpha1
+    panel: loss
+    run_name_contains:
+      - sawtooth-dropout-fourier-curriculum
+    run_name_suffix: sawtooth-dropout-fourier-curriculum-v1
+    checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-curriculum/sawtooth-dropout-fourier-curriculum-v1/last.ckpt
+    training_path: deterministic_pretrain_then_crps_finetune
+    context_schedule: variable_1_30
+    min_nc: 1
+    max_nc: 30
+    validation_support: variable_1_30
+    alpha: 1.0
+    expected_validation_points: 50
+
+  - name: Dropout pretrain-finetune alpha0.95
+    panel: loss
+    run_name_contains:
+      - sawtooth-dropout-fourier-curriculum-alpha095
+    run_name_suffix: sawtooth-dropout-fourier-curriculum-alpha095-v1
+    checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-curriculum-alpha095/sawtooth-dropout-fourier-curriculum-alpha095-v1/last.ckpt
+    training_path: deterministic_pretrain_then_crps_finetune
+    context_schedule: variable_1_30
+    min_nc: 1
+    max_nc: 30
+    validation_support: variable_1_30
+    alpha: 0.95
+    expected_validation_points: 50

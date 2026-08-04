@@ -1,0 +1,140 @@
+output_dir: results/synthetic_1d/sawtooth_alpha_ablation_final_20260803_v1
+device: cuda
+
+base_generator_config: experiments/configs/generators/sawtooth_1d_interpolation_nc14_30.yml
+eval_set_name: sawtooth_alpha_ablation_nc14
+
+# Diagnostic ablation rather than an 80k headline evaluation.
+samples_per_eval_set: 4096
+eval_batch_size: 16
+num_eval_samples: 256
+sample_chunk_size: 64
+
+deterministic_seed: 20260861
+sampling_seed: 20260862
+
+sawtooth:
+  min_freq: 2.0
+  max_freq: 4.0
+  noise_std: 0.0
+
+test_generator:
+  min_nc: 14
+  max_nc: 14
+  num_targets: 100
+
+sources:
+  - name: Trivial U(0,1)
+    kind: uniform
+    sampling_seed_offset: 1
+    metadata:
+      training_schedule: none
+      training_context: none
+      training_alpha: null
+
+  - name: Dropout variable alpha1
+    kind: model
+    model_config: experiments/configs/models/tnp_crps_dropout_fourier.yml
+    checkpoint_path: checkpoints/sawtooth_context_ladder/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-nc14-30/sawtooth-dropout-fourier-nc14-30-v1/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.p_dropout=0.10
+      - params.crps_alpha=1.0
+      - model.use_mc_dropout=true
+    sampling_seed_offset: 2
+    metadata:
+      training_schedule: from_scratch
+      training_context: variable_14_30
+      training_alpha: 1.0
+      training_num_samples: 4
+      training_p_dropout: 0.10
+
+  - name: Dropout variable alpha0.05
+    kind: model
+    model_config: experiments/configs/models/tnp_crps_dropout_fourier.yml
+    checkpoint_path: checkpoints/sawtooth_context_ladder/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-nc14-30-alpha005/sawtooth-dropout-fourier-nc14-30-alpha005-v1/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.p_dropout=0.10
+      - params.crps_alpha=0.05
+      - model.use_mc_dropout=true
+    sampling_seed_offset: 3
+    metadata:
+      training_schedule: from_scratch
+      training_context: variable_14_30
+      training_alpha: 0.05
+      training_num_samples: 4
+      training_p_dropout: 0.10
+
+  - name: Dropout pretrain-finetune alpha1
+    kind: model
+    model_config: experiments/configs/models/tnp_crps_dropout_fourier_curriculum.yml
+    checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-curriculum/sawtooth-dropout-fourier-curriculum-v1/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.p_dropout=0.10
+      - params.crps_alpha=1.0
+      - model.use_mc_dropout=true
+    sampling_seed_offset: 4
+    metadata:
+      training_schedule: deterministic_pretrain_then_crps_finetune
+      training_context: variable_1_30
+      training_alpha: 1.0
+      training_num_samples: 4
+      training_p_dropout: 0.10
+
+  - name: Dropout pretrain-finetune alpha0.95
+    kind: model
+    model_config: experiments/configs/models/tnp_crps_dropout_fourier_curriculum_alpha095.yml
+    checkpoint_path: checkpoints/sawtooth_interpolation/synthetic-1d-sawtooth-interpolation/sawtooth-dropout-fourier-curriculum-alpha095/sawtooth-dropout-fourier-curriculum-alpha095-v1/last.ckpt
+    overrides:
+      - params.num_samples=4
+      - params.p_dropout=0.10
+      - params.crps_alpha=0.95
+      - model.use_mc_dropout=true
+    sampling_seed_offset: 5
+    metadata:
+      training_schedule: deterministic_pretrain_then_crps_finetune
+      training_context: variable_1_30
+      training_alpha: 0.95
+      training_num_samples: 4
+      training_p_dropout: 0.10
+
+analysis:
+  output_prefix: sawtooth_alpha
+  bootstrap_seed: 20260912
+  source_order:
+    - Trivial U(0,1)
+    - Dropout variable alpha1
+    - Dropout variable alpha0.05
+    - Dropout pretrain-finetune alpha1
+    - Dropout pretrain-finetune alpha0.95
+  display_names:
+    Trivial U(0,1): Trivial $U(0,1)$
+    Dropout variable alpha1: Variable $N_c$, $\alpha=1$
+    Dropout variable alpha0.05: Variable $N_c$, $\alpha=0.05$
+    Dropout pretrain-finetune alpha1: Pretrain--fine-tune, $\alpha=1$
+    Dropout pretrain-finetune alpha0.95: Pretrain--fine-tune, $\alpha=0.95$
+  references:
+    - Trivial U(0,1)
+    - Dropout variable alpha1
+    - Dropout pretrain-finetune alpha1
+  bootstrap_metrics:
+    - rmse
+    - crps
+    - spread_skill_ratio
+    - coverage_90
+    - width_90
+  table:
+    filename: sawtooth_alpha_ablation_table.tex
+    label: sawtooth_alpha_ablation
+    columns:
+      - rmse
+      - crps
+      - coverage_90
+      - width_90
+    column_labels:
+      rmse: RMSE $\downarrow$
+      crps: CRPS $\downarrow$
+      coverage_90: Coverage$_{90}$
+      width_90: Width$_{90}$
