@@ -354,6 +354,49 @@ def _audit_configs(
     )
     _assert_unique_positive_offsets(ladder["sources"])
 
+    source_by_name = {
+        str(source["name"]): source
+        for source in ladder["sources"]
+    }
+    training_roles = dict(ladder.get("training_regime_roles", {}))
+    _assert_equal(
+        list(training_roles),
+        ["fixed32", "fixed64", "fixed128", "variable"],
+        "Training-regime role order",
+    )
+    expected_architectures = {
+        "Gaussian TNP",
+        "Dropout CRPS-TNP",
+        "StochLN CRPS-TNP",
+    }
+    for regime_name, regime in training_roles.items():
+        models = dict(regime["models"])
+        _assert_equal(
+            set(models),
+            expected_architectures,
+            f"Architecture set for {regime_name}",
+        )
+        for model_name in models.values():
+            if str(model_name) not in source_by_name:
+                raise AssertionError(
+                    f"Training regime {regime_name!r} references unknown "
+                    f"source {model_name!r}."
+                )
+
+    for source_name in (
+        "gaussian_fixed32",
+        "dropout_fixed32",
+        "stochln_fixed32",
+        "gaussian_fixed64",
+        "dropout_fixed64",
+        "stochln_fixed64",
+    ):
+        if source_by_name[source_name].get("eval_context_sizes") is not None:
+            raise AssertionError(
+                f"{source_name} is still restricted to matched-rung evaluation; "
+                "the final design requires all four context rungs."
+            )
+
     required_groups = {
         "all",
         "fixed128_and_baselines",
@@ -369,6 +412,11 @@ def _audit_configs(
     for section_name in ("context_dependence", "shape_calibration"):
         if section_name not in figures:
             raise AssertionError(f"Missing figure config section {section_name!r}.")
+    if "variant_delta_csv" not in figures["context_dependence"]:
+        raise AssertionError(
+            "Context figure config is missing the CRPS-variant-vs-Gaussian "
+            "paired-difference input."
+        )
 
     return {
         "headline": {

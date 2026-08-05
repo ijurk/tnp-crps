@@ -72,31 +72,57 @@ def _write_cache(path: Path, payload: Dict[str, Any], source_paths: list[Path]) 
 def build_context_cache(cfg: Dict[str, Any], root: Path, smoke: bool) -> None:
     figure_cfg = dict(cfg["context_dependence"])
     analysis_path = Path(figure_cfg["analysis_csv"])
+    variant_path = Path(figure_cfg["variant_delta_csv"])
     rejection_path = Path(figure_cfg["rejection_json"])
-    if not analysis_path.is_file():
-        raise FileNotFoundError(analysis_path)
+
+    for path in (analysis_path, variant_path):
+        if not path.is_file():
+            raise FileNotFoundError(path)
+
     frame = pd.read_csv(analysis_path)
+    variant = pd.read_csv(variant_path)
+
     if smoke:
         frame = frame.head(12).copy()
-    rejection = json.loads(rejection_path.read_text()) if rejection_path.is_file() else {}
+        variant = variant.head(8).copy()
+
+    rejection = (
+        json.loads(rejection_path.read_text())
+        if rejection_path.is_file()
+        else {}
+    )
+
     payload = {
-        "schema_version": "tabular_context_dependence_cache_v1",
+        "schema_version": "tabular_context_full_grid_cache_v2",
         "metadata": {
             "smoke": bool(smoke),
-            "metric": "context_resample_crps_minus_model_crps",
+            "margin_metric": "context_resample_crps_minus_model_crps",
+            "variant_metric": "gaussian_crps_minus_crps_variant_crps",
             "higher_is_better": True,
             "fixed_raw_targets_across_rungs": True,
+            "complete_training_regime_grid": True,
             "rejection_diagnostics": rejection,
         },
         "records": _records(frame),
+        "variant_vs_gaussian": _records(variant),
         "context_sizes": torch.tensor(
             sorted(frame["num_context"].unique()),
             dtype=torch.long,
         ),
+        "training_regimes": sorted(
+            frame["training_regime"].astype(str).unique().tolist()
+        ),
+        "architectures": sorted(
+            frame["architecture"].astype(str).unique().tolist()
+        ),
     }
     output = _output_path(root, str(figure_cfg["output_name"]), smoke)
-    _write_cache(output, payload, [analysis_path, rejection_path])
-    print("CACHE PASS [CONTEXT]")
+    _write_cache(
+        output,
+        payload,
+        [analysis_path, variant_path, rejection_path],
+    )
+    print("CACHE PASS [CONTEXT FULL GRID]")
 
 
 def build_shape_cache(cfg: Dict[str, Any], root: Path, smoke: bool) -> None:
