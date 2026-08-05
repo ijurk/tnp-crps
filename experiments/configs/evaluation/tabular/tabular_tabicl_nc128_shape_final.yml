@@ -1,0 +1,67 @@
+mode: shape
+output_dir: results/tabular/tabicl_nc128_shape_final_20260804_v1
+
+device: cuda
+metric_alpha: 1.0
+interval_levels: [0.90]
+compute_energy_score: false
+sampling_seed: 20260862
+num_eval_samples: 256
+sample_chunk_size: 64
+samples_per_eval_set: 4096
+eval_batch_size: 16
+max_batches: null
+
+eval_set_name: tabicl_nc128_shape_test
+base_generator_config: experiments/configs/generators/tabular_tabicl_bank_nc128.yml
+generator_overrides:
+  - generators.test.source.split=test
+  - generators.test.source.seed=20260728
+  - generators.test.source.shuffle=false
+  - generators.test.source.cycle=false
+  - generators.test.deterministic=true
+  - generators.test.deterministic_seed=20260728
+  - generators.test.min_nc=128
+  - generators.test.max_nc=128
+  - generators.test.min_nt=128
+  - generators.test.max_nt=128
+
+shape_analysis:
+  sample_counts:
+    - 64
+    - 512
+  rank_sample_count: 512
+  rank_plot_bins: 21
+
+sources:
+  - name: gaussian
+    display_name: Gaussian TNP
+    kind: model
+    training_alpha: null
+    sampling_seed_offset: 1
+    model_config: experiments/configs/models/tnp_tabular_gaussian.yml
+    checkpoint_path: checkpoints/tabular_tabicl_nc128_500/synthetic-tabular-regression/tabular-gaussian-L5-H8-D128/tabicl-nc128-gaussian-500ep-seed1-v1/epoch=0499.ckpt
+
+  - name: dropout
+    display_name: Dropout CRPS-TNP
+    kind: model
+    training_alpha: 1.0
+    sampling_seed_offset: 2
+    model_config: experiments/configs/models/tnp_tabular_dropout.yml
+    checkpoint_path: checkpoints/tabular_tabicl_nc128_500/synthetic-tabular-regression/tabular-dropout-m4-p0.1-a1.0-L5-H8-D128/tabicl-nc128-dropout-m4-p010-a1-500ep-seed1-v1/epoch=0499.ckpt
+
+  - name: stochln
+    display_name: StochLN CRPS-TNP
+    kind: model
+    training_alpha: 1.0
+    sampling_seed_offset: 3
+    model_config: experiments/configs/models/tnp_tabular_stochln.yml
+    checkpoint_path: checkpoints/tabular_tabicl_nc128_500/synthetic-tabular-regression/tabular-stochln-m4-z32-a1.0-L5-H8-D128/tabicl-nc128-stochln-m4-z32-a1-500ep-seed1-v1/epoch=0499.ckpt
+
+shape_order:
+  - gaussian
+  - dropout
+  - stochln
+
+roles:
+  gaussian: gaussian

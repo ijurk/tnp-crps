@@ -1,0 +1,239 @@
+output_dir: results/tabular/tabicl_nested_ladder_final_20260804_v1
+
+device: cuda
+metric_alpha: 1.0
+interval_levels: [0.90]
+compute_energy_score: false
+sampling_seed: 20260872
+num_eval_samples: 256
+sample_chunk_size: 64
+eval_batch_size: 16
+
+eval_set_name: tabicl_nested_context_ladder
+base_generator_config: experiments/configs/generators/tabular_tabicl_bank_variable_nc.yml
+
+nested_tasks:
+  cache_path: results/tabular/tabicl_nested_ladder_tasks_20260804_v1.pt
+  accepted_tasks: 4096
+  max_scanned_tasks: null
+  context_sizes:
+    - 16
+    - 32
+    - 64
+    - 128
+  context_pool_size: 128
+  num_targets: 128
+  row_permutation_seed: 20260870
+  feature_permutation_seed: 20260871
+  generator_overrides:
+    - generators.test.source.split=test
+    - generators.test.source.seed=20260728
+    - generators.test.source.shuffle=false
+    - generators.test.source.cycle=false
+    - generators.test.deterministic=false
+    - generators.test.min_nc=16
+    - generators.test.max_nc=128
+    - generators.test.context_sizes=null
+
+sources:
+  - name: context_mean
+    display_name: Context mean
+    kind: context_mean
+    training_alpha: null
+    sampling_seed_offset: 1
+
+  - name: context_gaussian
+    display_name: Context Gaussian
+    kind: context_gaussian
+    training_alpha: null
+    sampling_seed_offset: 2
+
+  - name: context_resample
+    display_name: Context resample
+    kind: context_resample
+    training_alpha: null
+    sampling_seed_offset: 3
+
+  - name: gaussian_fixed128
+    display_name: Gaussian TNP, fixed $N_c=128$
+    kind: model
+    training_alpha: null
+    sampling_seed_offset: 4
+    model_config: experiments/configs/models/tnp_tabular_gaussian.yml
+    checkpoint_path: checkpoints/tabular_tabicl_nc128_500/synthetic-tabular-regression/tabular-gaussian-L5-H8-D128/tabicl-nc128-gaussian-500ep-seed1-v1/epoch=0499.ckpt
+
+  - name: dropout_fixed128
+    display_name: Dropout CRPS-TNP, fixed $N_c=128$
+    kind: model
+    training_alpha: 1.0
+    sampling_seed_offset: 5
+    model_config: experiments/configs/models/tnp_tabular_dropout.yml
+    checkpoint_path: checkpoints/tabular_tabicl_nc128_500/synthetic-tabular-regression/tabular-dropout-m4-p0.1-a1.0-L5-H8-D128/tabicl-nc128-dropout-m4-p010-a1-500ep-seed1-v1/epoch=0499.ckpt
+
+  - name: stochln_fixed128
+    display_name: StochLN CRPS-TNP, fixed $N_c=128$
+    kind: model
+    training_alpha: 1.0
+    sampling_seed_offset: 6
+    model_config: experiments/configs/models/tnp_tabular_stochln.yml
+    checkpoint_path: checkpoints/tabular_tabicl_nc128_500/synthetic-tabular-regression/tabular-stochln-m4-z32-a1.0-L5-H8-D128/tabicl-nc128-stochln-m4-z32-a1-500ep-seed1-v1/epoch=0499.ckpt
+
+  - name: gaussian_variable
+    display_name: Gaussian TNP, variable $N_c$
+    kind: model
+    training_alpha: null
+    sampling_seed_offset: 7
+    model_config: experiments/configs/models/tnp_tabular_gaussian.yml
+    checkpoint_path: checkpoints/tabular_tabicl_variable_nc_500/synthetic-tabular-regression/tabular-gaussian-L5-H8-D128/tabicl-varnc-gaussian-500ep-seed1-v1/epoch=0499.ckpt
+
+  - name: dropout_variable
+    display_name: Dropout CRPS-TNP, variable $N_c$
+    kind: model
+    training_alpha: 1.0
+    sampling_seed_offset: 8
+    model_config: experiments/configs/models/tnp_tabular_dropout.yml
+    checkpoint_path: checkpoints/tabular_tabicl_variable_nc_500/synthetic-tabular-regression/tabular-dropout-m4-p0.1-a1.0-L5-H8-D128/tabicl-varnc-dropout-m4-p010-a1-500ep-seed1-v1/epoch=0499.ckpt
+
+  - name: stochln_variable
+    display_name: StochLN CRPS-TNP, variable $N_c$
+    kind: model
+    training_alpha: 1.0
+    sampling_seed_offset: 9
+    model_config: experiments/configs/models/tnp_tabular_stochln.yml
+    checkpoint_path: checkpoints/tabular_tabicl_variable_nc_500/synthetic-tabular-regression/tabular-stochln-m4-z32-a1.0-L5-H8-D128/tabicl-varnc-stochln-m4-z32-a1-500ep-seed1-v1/epoch=0499.ckpt
+
+  - name: gaussian_fixed32
+    display_name: Gaussian TNP, fixed $N_c=32$
+    kind: model
+    training_alpha: null
+    sampling_seed_offset: 10
+    eval_context_sizes: [32]
+    model_config: experiments/configs/models/tnp_tabular_gaussian.yml
+    checkpoint_path: checkpoints/tabular_tabicl_fixed_nc_500/synthetic-tabular-regression/tabular-gaussian-fixed-nc32-L5-H8-D128/tabicl-fixed-nc32-gaussian-500ep-seed1-v1/epoch=0499.ckpt
+
+  - name: dropout_fixed32
+    display_name: Dropout CRPS-TNP, fixed $N_c=32$
+    kind: model
+    training_alpha: 1.0
+    sampling_seed_offset: 11
+    eval_context_sizes: [32]
+    model_config: experiments/configs/models/tnp_tabular_dropout.yml
+    checkpoint_path: checkpoints/tabular_tabicl_fixed_nc_500/synthetic-tabular-regression/tabular-dropout-fixed-nc32-m4-p010-a1-L5-H8-D128/tabicl-fixed-nc32-dropout-m4-p010-a1-500ep-seed1-v1/epoch=0499.ckpt
+
+  - name: stochln_fixed32
+    display_name: StochLN CRPS-TNP, fixed $N_c=32$
+    kind: model
+    training_alpha: 1.0
+    sampling_seed_offset: 12
+    eval_context_sizes: [32]
+    model_config: experiments/configs/models/tnp_tabular_stochln.yml
+    checkpoint_path: checkpoints/tabular_tabicl_fixed_nc_500/synthetic-tabular-regression/tabular-stochln-fixed-nc32-m4-z32-a1-L5-H8-D128/tabicl-fixed-nc32-stochln-m4-z32-a1-500ep-seed1-v1/epoch=0499.ckpt
+
+  - name: gaussian_fixed64
+    display_name: Gaussian TNP, fixed $N_c=64$
+    kind: model
+    training_alpha: null
+    sampling_seed_offset: 13
+    eval_context_sizes: [64]
+    model_config: experiments/configs/models/tnp_tabular_gaussian.yml
+    checkpoint_path: checkpoints/tabular_tabicl_fixed_nc_500/synthetic-tabular-regression/tabular-gaussian-fixed-nc64-L5-H8-D128/tabicl-fixed-nc64-gaussian-500ep-seed1-v1/epoch=0499.ckpt
+
+  - name: dropout_fixed64
+    display_name: Dropout CRPS-TNP, fixed $N_c=64$
+    kind: model
+    training_alpha: 1.0
+    sampling_seed_offset: 14
+    eval_context_sizes: [64]
+    model_config: experiments/configs/models/tnp_tabular_dropout.yml
+    checkpoint_path: checkpoints/tabular_tabicl_fixed_nc_500/synthetic-tabular-regression/tabular-dropout-fixed-nc64-m4-p010-a1-L5-H8-D128/tabicl-fixed-nc64-dropout-m4-p010-a1-500ep-seed1-v1/epoch=0499.ckpt
+
+  - name: stochln_fixed64
+    display_name: StochLN CRPS-TNP, fixed $N_c=64$
+    kind: model
+    training_alpha: 1.0
+    sampling_seed_offset: 15
+    eval_context_sizes: [64]
+    model_config: experiments/configs/models/tnp_tabular_stochln.yml
+    checkpoint_path: checkpoints/tabular_tabicl_fixed_nc_500/synthetic-tabular-regression/tabular-stochln-fixed-nc64-m4-z32-a1-L5-H8-D128/tabicl-fixed-nc64-stochln-m4-z32-a1-500ep-seed1-v1/epoch=0499.ckpt
+
+source_groups:
+  all:
+    - context_mean
+    - context_gaussian
+    - context_resample
+    - gaussian_fixed128
+    - dropout_fixed128
+    - stochln_fixed128
+    - gaussian_variable
+    - dropout_variable
+    - stochln_variable
+    - gaussian_fixed32
+    - dropout_fixed32
+    - stochln_fixed32
+    - gaussian_fixed64
+    - dropout_fixed64
+    - stochln_fixed64
+
+  fixed128_and_baselines:
+    - context_mean
+    - context_gaussian
+    - context_resample
+    - gaussian_fixed128
+    - dropout_fixed128
+    - stochln_fixed128
+
+  variable:
+    - gaussian_variable
+    - dropout_variable
+    - stochln_variable
+
+  specialisation:
+    - gaussian_fixed32
+    - dropout_fixed32
+    - stochln_fixed32
+    - gaussian_fixed64
+    - dropout_fixed64
+    - stochln_fixed64
+
+roles:
+  context_resample: context_resample
+
+architecture_roles:
+  Gaussian TNP:
+    fixed128: gaussian_fixed128
+    variable: gaussian_variable
+    specialisation:
+      32: gaussian_fixed32
+      64: gaussian_fixed64
+      128: gaussian_fixed128
+  Dropout CRPS-TNP:
+    fixed128: dropout_fixed128
+    variable: dropout_variable
+    specialisation:
+      32: dropout_fixed32
+      64: dropout_fixed64
+      128: dropout_fixed128
+  StochLN CRPS-TNP:
+    fixed128: stochln_fixed128
+    variable: stochln_variable
+    specialisation:
+      32: stochln_fixed32
+      64: stochln_fixed64
+      128: stochln_fixed128
+
+table_order:
+  - context_mean
+  - context_gaussian
+  - context_resample
+  - gaussian_fixed128
+  - dropout_fixed128
+  - stochln_fixed128
+  - gaussian_variable
+  - dropout_variable
+  - stochln_variable
+  - gaussian_fixed32
+  - dropout_fixed32
+  - stochln_fixed32
+  - gaussian_fixed64
+  - dropout_fixed64
+  - stochln_fixed64

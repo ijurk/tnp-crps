@@ -1,0 +1,13 @@
+output_dir: results/dissertation_figures/tabular/caches
+
+context_dependence:
+  analysis_csv: results/tabular/tabicl_nested_ladder_final_20260804_v1/analysis/tabular_context_dependence_figure_data.csv
+  rejection_json: results/tabular/tabicl_nested_ladder_final_20260804_v1/analysis/nested_task_rejection_diagnostics.json
+  output_name: tabular_context_dependence_cache_v1.pt
+
+shape_calibration:
+  contribution_csv: results/tabular/tabicl_nc128_shape_final_20260804_v1/analysis/tabular_shape_contribution_summary.csv
+  null_adjusted_csv: results/tabular/tabicl_nc128_shape_final_20260804_v1/analysis/tabular_shape_null_adjusted.csv
+  rank_histogram_csv: results/tabular/tabicl_nc128_shape_final_20260804_v1/analysis/tabular_rank_histogram_binned.csv
+  rank_calibration_csv: results/tabular/tabicl_nc128_shape_final_20260804_v1/analysis/tabular_rank_calibration_summary.csv
+  output_name: tabular_shape_calibration_cache_v1.pt
